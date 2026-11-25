@@ -3,9 +3,17 @@ on:
   workflow_dispatch:
     inputs:
       publish_release:
-        description: 'Publish GitHub Release & macOS DMG (unchecked: build Windows .exe artifact only)'
+        description: 'Publish GitHub Release (creates tag v<version> with downloadable .exe links)'
         type: boolean
         default: false
+      include_macos:
+        description: 'Also build macOS Apple Silicon DMG (unchecked: Windows only, faster)'
+        type: boolean
+        default: false
+      skip_smoke:
+        description: 'Skip slow Electron UI smoke test during manual build (still runs unit tests)'
+        type: boolean
+        default: true
   push:
     branches: [main, master, jay_version]
   pull_request:
@@ -26,11 +34,22 @@ jobs:
         with:
           node-version: 22
           package-manager-cache: false
+      - name: Cache npm, Electron and builder binaries
+        uses: actions/cache@v4
+        with:
+          path: |
+            .codex-cache/npm
+            .codex-cache/electron
+            .codex-cache/electron-builder
+          key: ${{ runner.os }}-${{ runner.arch }}-build-cache-${{ hashFiles('package-lock.json') }}
+          restore-keys: |
+            ${{ runner.os }}-${{ runner.arch }}-build-cache-
       - name: Install
         run: ./scripts/windows.ps1 install
       - name: SSH and storage tests
         run: ./scripts/windows.ps1 test
       - name: Windows application smoke test
+        if: github.event_name != 'workflow_dispatch' || !inputs.skip_smoke
         env:
           JAYXTERM_LOCAL_DRAG_QA: '1'
           JAYXTERM_WORKSPACE_QA: '1'
@@ -51,15 +70,13 @@ jobs:
         if: github.event_name == 'workflow_dispatch'
         with:
           name: JayXTerm-Windows-x64
-          path: |
-            .codex-cache/releases/JayXTerm-*-x64-setup.exe
-            .codex-cache/releases/JayXTerm-*-x64-portable.exe
+          path: .codex-cache/releases/JayXTerm-*-x64-*.exe
           if-no-files-found: error
           include-hidden-files: true
           compression-level: 0
           overwrite: true
   macos:
-    if: github.event_name != 'workflow_dispatch' || inputs.publish_release
+    if: github.event_name != 'workflow_dispatch' || inputs.include_macos
     runs-on: macos-15
     timeout-minutes: 25
     steps:
@@ -71,6 +88,16 @@ jobs:
           node-version: 22
           architecture: arm64
           package-manager-cache: false
+      - name: Cache npm, Electron and builder binaries
+        uses: actions/cache@v4
+        with:
+          path: |
+            .codex-cache/npm
+            .codex-cache/electron
+            .codex-cache/electron-builder
+          key: ${{ runner.os }}-${{ runner.arch }}-build-cache-${{ hashFiles('package-lock.json') }}
+          restore-keys: |
+            ${{ runner.os }}-${{ runner.arch }}-build-cache-
       - name: Prepare build cache
         run: |
           cache="$GITHUB_WORKSPACE/.codex-cache"
@@ -122,7 +149,7 @@ jobs:
           compression-level: 0
           overwrite: true
   release:
-    if: github.event_name == 'workflow_dispatch' && github.ref_type == 'branch' && inputs.publish_release
+    if: always() && github.event_name == 'workflow_dispatch' && github.ref_type == 'branch' && inputs.publish_release && needs.windows.result == 'success' && (needs.macos.result == 'success' || needs.macos.result == 'skipped')
     needs: [windows, macos]
     runs-on: ubuntu-24.04
     timeout-minutes: 10
@@ -145,15 +172,17 @@ jobs:
           version="$(jq -er '.version | strings | select(test("^[0-9]+[.][0-9]+[.][0-9]+$"))' package.json)"
           tag="v$version"
           assets="$GITHUB_WORKSPACE/.codex-cache/release-assets"
-          setup="JayXTerm-${version}-x64-setup.exe"
-          portable="JayXTerm-${version}-x64-portable.exe"
-          mac="JayXTerm-${version}-arm64.dmg"
+          mapfile -t files < <(find "$assets" -maxdepth 1 -type f \( -name '*.exe' -o -name '*.dmg' \) | sort)
+          if [[ "${#files[@]}" -eq 0 ]]; then
+            echo "::error::No release assets found in $assets"
+            exit 1
+          fi
           (
             cd "$assets"
-            for file in "$setup" "$portable" "$mac"; do
-              test -s "$file" || { echo "::error::Missing release asset $file"; exit 1; }
+            for file in "${files[@]##*/}"; do
+              test -s "$file" || { echo "::error::Missing or empty release asset $file"; exit 1; }
             done
-            sha256sum "$setup" "$portable" "$mac" > SHA256SUMS.txt
+            sha256sum "${files[@]##*/}" > SHA256SUMS.txt
           )
           draft="$(gh release view "$tag" --repo "$GITHUB_REPOSITORY" --json isDraft --jq '.isDraft' 2>/dev/null || true)"
           if [[ "$draft" == false ]]; then
@@ -174,7 +203,7 @@ jobs:
               --title "JayXTerm $version" --generate-notes --draft
           fi
           if ! gh release upload "$tag" \
-            "$assets/$setup" "$assets/$portable" "$assets/$mac" "$assets/SHA256SUMS.txt" \
+            "${files[@]}" "$assets/SHA256SUMS.txt" \
             --repo "$GITHUB_REPOSITORY" --clobber; then
             echo "::error::Asset upload failed. Re-run the job to finish the draft."
             exit 1

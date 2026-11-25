@@ -1,5 +1,10 @@
 # 更新记录
 
+## 0.10.6
+
+- 终端支持 VS Code 风格 `Ctrl+C` / `Ctrl+V` 复制粘贴（有选区时 `Ctrl+C` 复制并清除选区，无选区时发送 `0x03` 中止；支持 `Ctrl+Shift+C/V` 与 macOS `Cmd+C/V`）。
+- 优化 GitHub Actions Windows 打包工作流：启用依赖与 Electron 缓存、默认仅打包便携版 `.exe` 并支持跳过重复 Smoke 与 macOS 队列以加速发布 Release。
+
 ## 0.10.4
 
 - 窗口缓存使用独立的目录，修复 Windows 切换缓存后无法解密已保存密码的问题。
