@@ -60,10 +60,20 @@ async function check(w, fixture) {
     for (const item of items) assert.equal(item.accelerator, undefined);
     return items;
   };
+  const primaryMod = process.platform === "darwin" ? 4 : 2;
   const paste = async (text) => {
     clipboard.writeText(text);
     const before = received().length;
     (await menu())[1].click();
+    await waitFor(() => received().length > before);
+    await delay(100);
+    return received().subarray(before);
+  };
+  const pasteByKey = async (text, modifiers = primaryMod) => {
+    clipboard.writeText(text);
+    const before = received().length;
+    await focus();
+    await key("v", "KeyV", 86, modifiers);
     await waitFor(() => received().length > before);
     await delay(100);
     return received().subarray(before);
@@ -95,23 +105,56 @@ async function check(w, fixture) {
     clipboard.writeText("not copied yet");
     choices[0].click();
     await waitFor(() => clipboard.readText().includes("RIGHT_CLICK_COPY_中文"));
-    // Selected text no longer turns Ctrl+C into a clipboard command.
-    clipboard.writeText("CLIPBOARD_UNCHANGED");
+    // VS Code-style Ctrl+C (Cmd+C on macOS): copies and clears selection when text is selected.
+    clipboard.writeText("not copied by key yet");
     let before = received().length;
+    await focus();
+    await key("c", "KeyC", 67, primaryMod);
+    await waitFor(() => clipboard.readText().includes("RIGHT_CLICK_COPY_中文"));
+    await delay(100);
+    assert.equal(
+      received().length,
+      before,
+      "Ctrl+C with active selection must copy without sending SIGINT",
+    );
+    choices = await menu();
+    assert.equal(
+      choices[0].enabled,
+      false,
+      "Ctrl+C copy must clear terminal selection so a follow-up Ctrl+C interrupts",
+    );
+    // With no selection, Ctrl+C sends 0x03 (SIGINT) and leaves clipboard untouched.
+    clipboard.writeText("CLIPBOARD_UNCHANGED");
+    before = received().length;
     await focus();
     await key("c", "KeyC", 67, 2);
     await waitFor(() => received().length > before);
     assert.deepEqual(received().subarray(before), Buffer.from([3]));
     assert.equal(clipboard.readText(), "CLIPBOARD_UNCHANGED");
-    clipboard.writeText("NO_KEYBOARD_PASTE");
-    before = received().length;
-    await key("v", "KeyV", 86, 2);
-    await waitFor(() => received().length > before);
-    await delay(100);
+    if (process.platform !== "darwin") {
+      // Ctrl+Shift+C copies when selected and does not send SIGINT when empty.
+      choices[3].click();
+      await delay(100);
+      clipboard.writeText("not copied by shift+c");
+      before = received().length;
+      await focus();
+      await key("C", "KeyC", 67, 2 | 8);
+      await waitFor(() => clipboard.readText().includes("RIGHT_CLICK_COPY_中文"));
+      await delay(100);
+      assert.equal(received().length, before);
+      before = received().length;
+      await focus();
+      await key("C", "KeyC", 67, 2 | 8);
+      await delay(100);
+      assert.equal(received().length, before);
+      assert.deepEqual(
+        await pasteByKey("Shift键UTF8粘贴", 2 | 8),
+        Buffer.from("Shift键UTF8粘贴"),
+      );
+    }
     assert.deepEqual(
-      received().subarray(before),
-      Buffer.from([22]),
-      "Ctrl+V must remain the terminal control key",
+      await pasteByKey("快捷键UTF8中文粘贴"),
+      Buffer.from("快捷键UTF8中文粘贴"),
     );
     assert.deepEqual(
       await paste("右键UTF8中文粘贴"),
@@ -119,20 +162,20 @@ async function check(w, fixture) {
     );
     await encoding("gbk");
     assert.deepEqual(
-      await paste("右键GBK中文"),
-      iconv.encode("右键GBK中文", "gbk"),
+      await pasteByKey("快捷键GBK中文"),
+      iconv.encode("快捷键GBK中文", "gbk"),
     );
-    assert.ok((await screen()).includes("右键GBK中文"));
+    assert.ok((await screen()).includes("快捷键GBK中文"));
     [...fixture.streams][0].write("\x1b[?2004h");
     await delay(100);
     assert.deepEqual(
-      await paste("第一行\r\n第二行\n第三行"),
+      await pasteByKey("第一行\r\n第二行\n第三行"),
       iconv.encode("\x1b[200~第一行\r第二行\r第三行\x1b[201~", "gbk"),
     );
     [...fixture.streams][0].write("\x1b[?2004l");
     await encoding("utf-8");
     console.log(
-      "PASS: context-menu-only copy/paste, no menu accelerators, Ctrl+C/Ctrl+V retain terminal behavior, UTF-8/GBK and bracketed multiline paste",
+      "PASS: VS Code-style Ctrl+C/V (copy on selection, 0x03 when empty, single paste), context menu, UTF-8/GBK and bracketed multiline paste",
     );
   } finally {
     Menu.buildFromTemplate = originalMenu;

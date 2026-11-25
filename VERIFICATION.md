@@ -1,5 +1,12 @@
 # 初版验证记录
 
+## 2026-11-25：终端 Ctrl+C / Ctrl+V 复制粘贴（VS Code 风格）
+
+- 分支 `feat/ctrl-cv-clipboard`：在 `src/terminal-clipboard.mjs` 实现快捷键动作解析，在 `src/renderer.js` 通过 `term.attachCustomKeyEventHandler` 接入 xterm 实例并复用 `terminalClipboard`，同时保留右键菜单复制/粘贴及浏览器原生 `copy` / `paste` 事件拦截（防止隐藏 textarea 触发双倍粘贴）。
+- 行为约定：Windows/Linux 下终端有选区时按 `Ctrl+C` 复制到系统剪贴板并清除选区（不发 `0x03`），无选区时发送 `0x03`（`SIGINT`）；`Ctrl+V` 执行终端粘贴，不发 `0x16`；`Ctrl+Shift+C` / `Ctrl+Shift+V` 支持强制复制/粘贴；macOS 使用 `Cmd+C` / `Cmd+V` 并保留 `Ctrl+C` / `Ctrl+V` 终端控制键。
+- 单元测试 `./scripts/windows.ps1 test`：全部 46 项通过（含新增 `src/terminal-clipboard.test.cjs` 5 项用例，覆盖选区/无选区、Shift 组合、macOS 与 IME 组合态）。
+- Electron 集成验证：清除父进程继承的 `ELECTRON_RUN_AS_NODE` 后，启用 `JAYXTERM_CLIPBOARD_QA=1`、`JAYXTERM_LOCAL_DRAG_QA=1`、`JAYXTERM_WORKSPACE_QA=1`、`JAYXTERM_SESSION_EXCHANGE_QA=1`、`JAYXTERM_SETTINGS_QA=1`、`JAYXTERM_FEATURES_QA=1`、`JAYXTERM_ASSIST_QA=1` 运行 `./scripts/windows.ps1 smoke`，约 27.5 秒全部通过；`scripts/clipboard-check.cjs` 验证选中按 `Ctrl+C` 复制并清选区、无选区按 `Ctrl+C` 发送 `0x03`、`Ctrl+Shift+C/V`、`Ctrl+V` UTF-8/GBK 及括号多行单次粘贴与右键菜单均正常。
+
 ## 2026-11-23：Windows 拖动状态释放与高延迟输入
 
 - 真实 Windows 鼠标复现：无窗口的独立辅助进程进入 OLE 拖动后，线程未接入源窗口输入队列，无法收到松键和 Esc，主进程一直保留传输占用。抓取辅助线程栈确认停在 `DoDragDrop` 消息循环。仅在同步拖动期间通过 `AttachThreadInput` 连接前台源窗口队列，返回后立即解除。

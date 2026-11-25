@@ -9,9 +9,11 @@ import { installTerminalSearch } from "./terminal-search.js";
 import { fileIcon, trashIcon } from "./file-icons.js";
 import { installQuickPasswords } from "./quick-passwords.js";
 import { installTerminalEcho } from "./terminal-echo.mjs";
+import { resolveTerminalClipboardShortcut } from "./terminal-clipboard.mjs";
 import "./style.css";
 const $ = (s) => document.querySelector(s);
 const api = window.api;
+const isMacPlatform = /\bMac/i.test(navigator.platform || navigator.userAgent);
 let sessions = [],
   current = null,
   pendingDelete = null,
@@ -473,12 +475,15 @@ async function duplicateTab(tab) {
     tab.duplicating = false;
   }
 }
-async function terminalClipboard(t, action) {
+async function terminalClipboard(t, action, { clearOnCopy = false } = {}) {
   if (!t || !tabs.has(t.id) || t.moving) return;
   try {
     if (action === "copy") {
       const text = t.term.getSelection();
-      if (text) await api.writeClipboard(text);
+      if (text) {
+        if (clearOnCopy) t.term.clearSelection();
+        await api.writeClipboard(text);
+      }
     } else if (action === "paste") {
       if (t.state !== "已连接") return;
       const text = await api.readClipboard();
@@ -556,14 +561,26 @@ function createTerminal(session, id, { moving = false } = {}) {
     if (current !== id && !fileWorkspaceOpen && tab.group.shown === id)
       activate(id, false);
   });
-  // Clipboard operations are available only through the terminal context menu.
-  // Keep ordinary terminal keys (Ctrl+C, Vim Ctrl+V, etc.) untouched.
+  // Route terminal clipboard shortcuts via Electron IPC and block browser-native
+  // copy/paste events on the hidden textarea to avoid duplicate paste into xterm.
   const blockBrowserClipboard = (event) => {
     event.preventDefault();
     event.stopImmediatePropagation();
   };
   pane.addEventListener("copy", blockBrowserClipboard, true);
   pane.addEventListener("paste", blockBrowserClipboard, true);
+  term.attachCustomKeyEventHandler((event) => {
+    const action = resolveTerminalClipboardShortcut(event, {
+      hasSelection: term.hasSelection(),
+      isMac: isMacPlatform,
+    });
+    if (!action) return true;
+    event.preventDefault();
+    if (action !== "noop" && !event.repeat) {
+      terminalClipboard(tab, action, { clearOnCopy: action === "copy" });
+    }
+    return false;
+  });
   pane.oncontextmenu = (event) => {
     event.preventDefault();
     api

@@ -1,6 +1,11 @@
 name: JayXTerm CI and Release
 on:
   workflow_dispatch:
+    inputs:
+      publish_release:
+        description: 'Publish GitHub Release & macOS DMG (unchecked: build Windows .exe artifact only)'
+        type: boolean
+        default: false
   push:
     branches: [main, master, jay_version]
   pull_request:
@@ -54,6 +59,7 @@ jobs:
           compression-level: 0
           overwrite: true
   macos:
+    if: github.event_name != 'workflow_dispatch' || inputs.publish_release
     runs-on: macos-15
     timeout-minutes: 25
     steps:
@@ -116,7 +122,7 @@ jobs:
           compression-level: 0
           overwrite: true
   release:
-    if: github.event_name == 'workflow_dispatch' && github.ref_type == 'branch'
+    if: github.event_name == 'workflow_dispatch' && github.ref_type == 'branch' && inputs.publish_release
     needs: [windows, macos]
     runs-on: ubuntu-24.04
     timeout-minutes: 10
