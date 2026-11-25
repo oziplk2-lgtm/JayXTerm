@@ -419,7 +419,11 @@ process.on("message", async (m) => {
             s.lstat(m.path, (e, attrs) =>
               e && e.code === 2
                 ? resolve({ exists: false })
-                : done(e, { exists: true, directory: attrs?.isDirectory() }),
+                : done(e, {
+                    exists: true,
+                    directory: attrs?.isDirectory(),
+                    size: attrs?.size ?? 0,
+                  }),
             );
           else if (m.action === "stat-target") {
             const checkPath = (target) =>
@@ -453,9 +457,15 @@ process.on("message", async (m) => {
             s.lstat(m.path, (statErr) => {
               if (!statErr) return reject(new Error("同名文件或目录已存在"));
               if (statErr.code !== 2) return reject(statErr);
-              s.open(m.path, "wx", (openErr, handle) => {
+              const finishCreate = (openErr, handle) => {
                 if (openErr) return reject(openErr);
                 s.close(handle, (closeErr) => done(closeErr, { path: m.path }));
+              };
+              s.open(m.path, "wx", 0o644, (openErr, handle) => {
+                if (openErr && (openErr.code === 8 || /unsupported/i.test(openErr.message))) {
+                  return s.open(m.path, "w", 0o644, finishCreate);
+                }
+                finishCreate(openErr, handle);
               });
             });
           } else if (m.action === "rename") {

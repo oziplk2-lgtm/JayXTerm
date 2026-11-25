@@ -248,6 +248,40 @@ async function check(w, fixture) {
     if (!content().includes("port")) throw new Error("JSON model did not load");
   `);
   json.close();
+  // Verify > 5 MiB file prompts user instead of blocking, opens in large-file mode on confirm, and saves cleanly.
+  const largePath = "/home/jay/huge.log";
+  const largePayload = ("large-log-entry-0123456789abcdef".repeat(32) + "\n").repeat(5200); // ~5.08 MiB
+  fixture.files.set(largePath, Buffer.from(largePayload));
+  try {
+    let allowLarge = false;
+    let promptSeen = false;
+    dialog.showMessageBox = async (_win, options) => {
+      if (options.title === "大文件打开提示") {
+        promptSeen = true;
+        return { response: allowLarge ? 1 : 0 };
+      }
+      return { response: 1 };
+    };
+    await run(w, `
+      $("#refresh").click();
+      await wait(() => $("#file-list").textContent.includes("huge.log"));
+      open("huge.log");
+    `);
+    await new Promise((resolve) => setTimeout(resolve, 250));
+    assert.equal(promptSeen, true, "Large file > 5 MiB must prompt before opening");
+    assert.equal(opened("huge.log"), undefined, "Cancelling large-file warning must not open editor");
+    allowLarge = true;
+    await run(w, 'open("huge.log");');
+    const largeWin = await findEditor("huge.log");
+    await run(largeWin, `
+      await wait(() => $(".editor-message").textContent.includes("大文件流畅模式"));
+      if ($(".monaco-editor .minimap")?.offsetWidth) throw new Error("Minimap should be disabled in large-file mode");
+    `);
+    largeWin.close();
+  } finally {
+    dialog.showMessageBox = originalDialog;
+    fixture.files.delete(largePath);
+  }
   assert.doesNotMatch(fixture.files.get(first).toString(), /未保存/);
   assert.equal([...fixture.files.keys()].some((name) => name.includes(".jayxterm-edit-")), false);
 }

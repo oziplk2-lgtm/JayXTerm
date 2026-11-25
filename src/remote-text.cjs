@@ -2,7 +2,9 @@ const { createHash, randomUUID } = require("node:crypto");
 const { posix } = require("node:path");
 const iconv = require("iconv-lite");
 
-const maxFileBytes = 2 * 1024 * 1024;
+const largeFileWarnBytes = 5 * 1024 * 1024;
+const maxFileBytes = largeFileWarnBytes;
+const chunkSize = 65536;
 const utf8 = new TextDecoder("utf-8", { fatal: true, ignoreBOM: true });
 const utf8Bom = Buffer.from([0xef, 0xbb, 0xbf]);
 const binaryControls = /[\x00-\x08\x0b\x0e-\x1f\x7f]/;
@@ -26,7 +28,6 @@ function checkAttrs(attrs) {
   if (!attrs.isFile()) throw new Error("只能编辑普通文件");
   if (!Number.isSafeInteger(attrs.size) || attrs.size < 0)
     throw new Error("服务器未返回有效的文件大小");
-  if (attrs.size > maxFileBytes) throw new Error("文本编辑支持最大 2 MiB 的文件");
 }
 
 async function snapshot(sftp, path) {
@@ -39,7 +40,7 @@ async function snapshot(sftp, path) {
     let offset = 0;
     while (offset < bytes.length) {
       const count = await call(
-        sftp, "read", handle, bytes, offset, Math.min(32768, bytes.length - offset), offset,
+        sftp, "read", handle, bytes, offset, Math.min(chunkSize, bytes.length - offset), offset,
       );
       if (!count) break;
       offset += count;
@@ -87,7 +88,13 @@ async function readRemoteText(sftp, path, encoding) {
   const directory = await call(sftp, "realpath", posix.dirname(path));
   const canonical = posix.join(directory, posix.basename(path));
   const { content, version } = await snapshot(sftp, canonical);
-  return { ...decode(content, encoding), version, path: canonical };
+  return {
+    ...decode(content, encoding),
+    version,
+    path: canonical,
+    size: content.length,
+    largeFile: content.length > largeFileWarnBytes,
+  };
 }
 
 async function replace(sftp, temporary, path) {
@@ -140,7 +147,6 @@ async function saveRemoteText(sftp, path, text, version, sourceEncoding, encodin
     if (iconv.decode(content, encoding, { stripBOM: false }) !== restored)
       throw new Error("编辑内容包含当前编码无法保存的字符。请修改这些字符，或用 UTF-8 保存");
     if (bom && encoding === "utf-8") content = Buffer.concat([utf8Bom, content]);
-    if (content.length > maxFileBytes) throw new Error("保存后的文件不能超过 2 MiB");
     if (binaryControls.test(restored)) throw new Error("文本含有不支持的控制字符");
     phase = "创建同目录临时文件";
     const handle = await call(sftp, "open", temporary, "wx", 0o600);
@@ -148,8 +154,8 @@ async function saveRemoteText(sftp, path, text, version, sourceEncoding, encodin
     const { mode, uid, gid } = original.attrs;
     try {
       phase = "写入临时文件";
-      for (let offset = 0; offset < content.length; offset += 32768)
-        await call(sftp, "write", handle, content, offset, Math.min(32768, content.length - offset), offset);
+      for (let offset = 0; offset < content.length; offset += chunkSize)
+        await call(sftp, "write", handle, content, offset, Math.min(chunkSize, content.length - offset), offset);
       const attrs = await call(sftp, "fstat", handle);
       phase = "保留原文件权限和所有者";
       if (attrs.uid !== uid || attrs.gid !== gid)
@@ -190,4 +196,4 @@ async function saveRemoteText(sftp, path, text, version, sourceEncoding, encodin
     if (!paths.size) saving.delete(sftp);
   }
 }
-module.exports = { readRemoteText, saveRemoteText, maxFileBytes };
+module.exports = { readRemoteText, saveRemoteText, maxFileBytes, largeFileWarnBytes };

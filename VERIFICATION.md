@@ -1,5 +1,11 @@
 # 初版验证记录
 
+## 2026-11-25（0.10.16）：修复「新建文件」下拉菜单错位并取消编辑器 2 MiB 限制改为 5 MiB 提示
+
+- 新建文件修复：`src/renderer.js` 将 `#file-new-options` 纳入 `beforetoggle` 坐标定位并校验目录已解析；`index.html` 与 `src/renderer.js` 在新建文件弹窗新增「创建后立即打开编辑」；`src/ssh-worker.cjs` 对不支持 `O_EXCL`（`wx`）的精简 SFTP 服务端增加 `w` 回退。
+- 取消编辑器大小硬限制：`src/remote-text.cjs` 与 `src/editor-windows.cjs` 移除 2 MiB 读写硬报错，改为打开前通过 `stat` 检测体积超过 **5 MiB** 时弹出「大文件打开提示」确认框；`src/main.cjs` 取消 `read-text` 30 秒超时，读写块升至 64 KiB；`src/remote-editor.js` 对 > 5 MiB 文件自动关闭 minimap/folding/bracketPairColorization 并展示「大文件流畅模式」提示。
+- 验证：64 项单元测试（含新增 `src/remote-text.test.cjs` 5.28 MiB 读写单测）与完整 CI Smoke + `JAYXTERM_EDITOR_QA=1`（31.8 秒）全部通过；`features-check.cjs` 校验 `#file-new-options` 坐标紧贴按钮下方并完成新建文件，`remote-editor-check.cjs` 校验 5.08 MiB 大文件取消/确认打开及大文件流畅模式全部正常。
+
 ## 2026-11-25（0.10.15）：性能与稳定性优化 + P0 四项核心功能
 
 - 性能与稳定性：`src/ssh-worker.cjs` 升级为零 Base64 UTF-8 直传（`StringDecoder("utf8")` + 8ms 自适应微批合并，首包 0ms 零额外延迟）；`src/terminal-keywords.mjs` 加入刷屏自适应节流与轻量签名比对；`src/main.cjs` 增加 `requestSingleInstanceLock({ version })` 版本冲突弹窗提示、`uncaughtException` 强制清理退出与可选 `hardwareAcceleration` 开关。

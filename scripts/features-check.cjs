@@ -261,14 +261,26 @@ async function check(win, fixture) {
     assert.equal(splitAndSidebar.hiddenByBtn, true);
     assert.equal(splitAndSidebar.shownByKey, true);
 
-    // Verify P0-3 remote file operations (create file, mkdir, rename, hide dotfiles) and P0-4 Ctrl+Wheel zoom.
+    // Verify P0-3 remote file operations (new-file popover position, create file, mkdir, rename, hide dotfiles) and P0-4 Ctrl+Wheel zoom.
     await run(`
       $('#mode-files').click();
       $('#remote-path').value = '/home/jay';
       $('#path-form').requestSubmit();
       await wait(() => [...document.querySelectorAll('#file-list .filename')].some(n => n.textContent === 'README.md'));
+      $('#file-new').click();
+      await wait(() => $('#file-new-options').matches(':popover-open'));
+      const btnRect = $('#file-new').getBoundingClientRect();
+      const popRect = $('#file-new-options').getBoundingClientRect();
+      if (Math.abs(popRect.left - btnRect.left) > 12 || popRect.top < btnRect.bottom)
+        throw new Error('New-file popover positioned incorrectly: ' + JSON.stringify({ btnRect, popRect }));
+      $('#new-remote-file').click();
+      await wait(() => $('#file-entry-dialog').open);
+      $('#file-entry-open').checked = false;
+      $('#file-entry-input').value = 'qa-note.txt';
+      $('#file-entry-form').requestSubmit();
+      await wait(() => !$('#file-entry-dialog').open);
+      await wait(() => [...document.querySelectorAll('#file-list .filename')].some(n => n.textContent === 'qa-note.txt'));
       await api.mkdirRemote({ id: $('.tab.active').dataset.connection, path: '/home/jay/qa-dir' });
-      await api.createRemoteFile({ id: $('.tab.active').dataset.connection, path: '/home/jay/qa-note.txt' });
       await api.renameRemote({ id: $('.tab.active').dataset.connection, from: '/home/jay/qa-note.txt', to: '/home/jay/.qa-hidden.txt' });
       $('#refresh').click();
       await wait(() => [...document.querySelectorAll('#file-list .filename')].some(n => n.textContent === '.qa-hidden.txt'));

@@ -144,7 +144,23 @@ function refreshDirty() {
 function load(data) {
   encoding = data.encoding;
   eol = data.eol;
+  const large = Boolean(data.largeFile);
+  const perfOptions = large
+    ? {
+        minimap: { enabled: false },
+        folding: false,
+        bracketPairColorization: { enabled: false },
+        renderWhitespace: "none",
+        largeFileOptimizations: true,
+      }
+    : {
+        minimap: { enabled: true },
+        folding: true,
+        bracketPairColorization: { enabled: true },
+        largeFileOptimizations: true,
+      };
   if (view) {
+    view.updateOptions(perfOptions);
     view.setValue(data.text);
     view.setPosition({ lineNumber: 1, column: 1 });
     view.setScrollPosition({ scrollTop: 0, scrollLeft: 0 });
@@ -159,12 +175,12 @@ function load(data) {
       fontSize: 13,
       cursorWidth: 2,
       tabSize: 4,
-      minimap: { enabled: true },
       selectionHighlight: false,
       occurrencesHighlight: "off",
       wordBasedSuggestions: "off",
       quickSuggestions: false,
       experimentalGpuAcceleration: "off",
+      ...perfOptions,
     });
     view.addCommand(KeyMod.CtrlCmd | KeyCode.KeyS, () => save());
     view.onDidChangeModelContent(refreshDirty);
@@ -244,7 +260,12 @@ try {
   breadcrumb.textContent = [data.server, ...data.path.split("/").filter(Boolean)].join("  ›  ");
   breadcrumb.title = data.path;
   load(data);
-  setMessage("远程文件");
+  if (data.largeFile && Number.isFinite(data.size)) {
+    const mb = (data.size / (1024 * 1024)).toFixed(1);
+    setMessage(`大文件（${mb} MiB）· 已自动启用大文件流畅模式`);
+  } else {
+    setMessage("远程文件");
+  }
 } catch (error) {
   setMessage("打开失败：" + errorText(error));
 }

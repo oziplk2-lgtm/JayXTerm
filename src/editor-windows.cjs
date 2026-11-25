@@ -1,6 +1,10 @@
 const { BrowserWindow, dialog, ipcMain, screen } = require("electron");
 const path = require("node:path");
-const { maxFileBytes } = require("./remote-text.cjs");
+const { largeFileWarnBytes } = require("./remote-text.cjs");
+
+function formatMiB(bytes) {
+  return (bytes / (1024 * 1024)).toFixed(1) + " MiB";
+}
 
 function installEditorWindows({ ensureOwner, request, connected, didSave, background }) {
   const files = new Map();
@@ -11,6 +15,23 @@ function installEditorWindows({ ensureOwner, request, connected, didSave, backgr
   };
 
   async function openWindow(file, parent) {
+    const info = await request({ id: file.id, path: file.path, action: "stat" });
+    if (!connected(file.id) || !parent || parent.isDestroyed())
+      throw new Error("SSH 会话已断开");
+    if (info?.exists && !info.directory && Number.isFinite(info.size) && info.size > largeFileWarnBytes) {
+      const { response } = await dialog.showMessageBox(parent, {
+        type: "warning",
+        title: "大文件打开提示",
+        message: `文件 ${file.name} 较大（${formatMiB(info.size)}），是否继续在编辑器中打开？`,
+        detail: `${file.server} · ${file.path}\n\n超过 5 MiB 的文本文件会占用较多内存，读取、渲染和保存可能较慢。打开后将自动启用大文件流畅模式。`,
+        buttons: ["取消", "仍要打开"],
+        defaultId: 1,
+        cancelId: 0,
+      });
+      if (response !== 1) return null;
+      if (!connected(file.id) || !parent || parent.isDestroyed())
+        throw new Error("SSH 会话已断开");
+    }
     const data = await request({ id: file.id, path: file.path, action: "read-text" });
     if (!connected(file.id) || !parent || parent.isDestroyed())
       throw new Error("SSH 会话已断开");
@@ -88,7 +109,7 @@ function installEditorWindows({ ensureOwner, request, connected, didSave, backgr
     const existing = files.get(key);
     if (existing) {
       const win = await existing;
-      if (!win.isDestroyed()) {
+      if (win && !win.isDestroyed()) {
         if (win.isMinimized()) win.restore();
         win.focus();
       }
@@ -98,7 +119,8 @@ function installEditorWindows({ ensureOwner, request, connected, didSave, backgr
     const opening = openWindow(file, BrowserWindow.fromWebContents(event.sender));
     files.set(key, opening);
     try {
-      await opening;
+      const win = await opening;
+      if (!win) files.delete(key);
     } catch (error) {
       files.delete(key);
       throw error;
@@ -144,8 +166,8 @@ function installEditorWindows({ ensureOwner, request, connected, didSave, backgr
     return data;
   }));
   ipcMain.handle("editor:save", (event, { text, encoding: choice, force }) => operate(event, async (file) => {
-    if (typeof text !== "string" || text.length > maxFileBytes)
-      throw new Error("保存后的文件不能超过 2 MiB");
+    if (typeof text !== "string")
+      throw new Error("无效的文本内容");
     const targetEncoding = encoding(choice);
     let forceFormat;
     if (force === true) {

@@ -136,7 +136,7 @@ function safeSessions() {
 function request(message) {
   return new Promise((resolve, reject) => {
     const rid = randomUUID();
-    const timer = ["upload", "download", "relay", "save-text", "remove"].includes(message.action)
+    const timer = ["upload", "download", "relay", "read-text", "save-text", "remove"].includes(message.action)
       ? null
       : setTimeout(() => {
           requests.delete(rid);

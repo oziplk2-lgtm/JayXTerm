@@ -657,6 +657,7 @@ $("#cwd-help").onclick = () => {
   showCwdDialog(tabs.get(current));
 };
 for (const [menuId, buttonId, opensUp] of [
+  ["#file-new-options", "#file-new", false],
   ["#upload-options", "#upload", false],
   ["#help-options", "#help-menu", true],
 ]) {
@@ -1529,11 +1530,17 @@ function openFileEntryDialog({ mode, tab, existingName = "", existingPath = "" }
     toast("请先连接 SSH");
     return;
   }
+  if (mode !== "rename" && (!tab.path || !tab.path.startsWith("/"))) {
+    toast("请先等待远程目录加载完成");
+    return;
+  }
   pendingFileEntry = { mode, tab, existingName, existingPath };
   $("#file-entry-title").textContent =
     mode === "new-file" ? "新建远端文件" : mode === "new-folder" ? "新建远端文件夹" : "重命名";
   $("#file-entry-parent").textContent =
     mode === "rename" ? `原路径：${existingPath}` : `目标目录：${tab.path}`;
+  const openWrap = $("#file-entry-open-wrap");
+  if (openWrap) openWrap.hidden = mode !== "new-file";
   const input = $("#file-entry-input");
   input.value = mode === "rename" ? existingName : "";
   input.placeholder = mode === "new-folder" ? "例如：logs" : "例如：config.yaml";
@@ -1560,11 +1567,13 @@ $("#file-entry-form").onsubmit = async (event) => {
   submitBtn.disabled = true;
   try {
     if (mode === "new-file") {
+      const openAfter = Boolean($("#file-entry-open")?.checked);
       const target = remoteJoin(tab.path, name);
       await api.createRemoteFile({ id: tab.id, path: target });
       $("#file-entry-dialog").close();
       await loadFiles(tab, tab.path);
       toast("已新建文件：" + name);
+      if (openAfter) openRemoteEditor(tab, { name });
     } else if (mode === "new-folder") {
       const target = remoteJoin(tab.path, name);
       await api.mkdirRemote({ id: tab.id, path: target });
