@@ -1,5 +1,10 @@
 # 初版验证记录
 
+## 2026-11-25（0.10.12）：修复 CI 标签背景过渡帧竞态
+
+- 根因：`src/style.css` 中 `.tab` 带有 `transition: background 0.12s`，在关闭相邻标签后立即读取活动标签 `getComputedStyle(tab).backgroundColor` 时，CI 较慢帧率下会采样到过渡态 `rgba(34, 68, 102, 0.973)`。
+- 修复：移除 `.tab` 的 `background/color` 过渡延迟，激活标签与 VS Code 一致即时切换，彻底消除过渡态竞态并验证完整 CI Smoke 通过。
+
 ## 2026-11-25（0.10.11）：会话窗口历史命令保存、检索与安全复用
 
 - 存储与采集：新增 `src/command-history.cjs`（`openStore` 原子写入 `0o600`、按会话去重、次数统计、收藏永不淘汰、容量上限、敏感词与前导空格过滤）与 `src/terminal-history.mjs`（普通缓冲区行追踪、`Tab`/方向键提示符提取、多词分词过滤、`Ctrl+Shift+H`/`Cmd+Shift+H` 快捷键解析）。
