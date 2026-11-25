@@ -1,5 +1,6 @@
 import { terminalDefaults, terminalFont } from "./terminal-settings.mjs";
 import { installFontPicker } from "./font-picker.js";
+import { normalizeHexColor } from "./color-picker-utils.mjs";
 
 // Add sections in the markup and fields here; loading/saving and navigation stay shared.
 const fields = ["backgroundColor", "fontFamily", "cjkFontFamily", "fontSize", "defaultEncoding", "highlightKeywords", "terminalSearchEnabled", "quickPasswordsEnabled", "predictiveEcho", "fileOpen", "saveHistory"];
@@ -40,7 +41,8 @@ export function installSettingsPanel({ api, previewColor, previewFont, previewKe
   function preview() {
     const input = readFields();
     fontPicker.sync();
-    $("#settings-background-value").value = input.backgroundColor;
+    const hexField = $("#settings-background-value");
+    if (document.activeElement !== hexField) hexField.value = input.backgroundColor;
     previewColor(input.backgroundColor);
     previewFont(input);
     previewKeywords(input.highlightKeywords);
@@ -49,6 +51,31 @@ export function installSettingsPanel({ api, previewColor, previewFont, previewKe
       fontSize: terminalFont(input).fontSize + "px",
     });
   }
+  const hexField = $("#settings-background-value");
+  hexField.oninput = () => {
+    const normalized = normalizeHexColor(hexField.value);
+    if (!normalized) return;
+    form.elements.backgroundColor.value = normalized;
+    preview();
+  };
+  hexField.onblur = () => { hexField.value = form.elements.backgroundColor.value; };
+  $("#settings-pick-color").onclick = async () => {
+    const button = $("#settings-pick-color");
+    if (button.disabled) return;
+    button.disabled = true;
+    try {
+      const picked = await api.pickScreenColor();
+      if (picked && dialog.open) {
+        form.elements.backgroundColor.value = picked;
+        hexField.value = picked;
+        preview();
+      }
+    } catch (error) {
+      toast(error.message);
+    } finally {
+      button.disabled = false;
+    }
+  };
   for (const name of ["backgroundColor", "fontFamily", "cjkFontFamily", "fontSize", "highlightKeywords"])
     form.elements[name].oninput = preview;
   function renderCache() {

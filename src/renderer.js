@@ -17,6 +17,9 @@ const isMacPlatform = /\bMac/i.test(navigator.platform || navigator.userAgent);
 let sessions = [],
   current = null,
   pendingDelete = null,
+  selectedSessionId = null,
+  copiedSessionId = null,
+  duplicatingSession = false,
   passwordResolve;
 let editorVersion = 0;
 const tabs = new Map();
@@ -197,11 +200,50 @@ function setMode(mode) {
 }
 $("#mode-sessions").onclick = () => setMode("sessions");
 $("#mode-files").onclick = () => setMode("files");
+function selectSessionRow(id, { focus = false } = {}) {
+  selectedSessionId = id;
+  for (const row of $("#sessions").querySelectorAll(".session")) {
+    const active = row.dataset.sessionId === id;
+    row.classList.toggle("selected", active);
+    row.setAttribute("aria-selected", String(active));
+    if (active && focus) row.focus();
+  }
+}
+function copySelectedSession() {
+  const target = sessions.find((s) => s.id === selectedSessionId);
+  if (!target) return false;
+  copiedSessionId = target.id;
+  toast(`已复制会话「${target.name}」，在会话列表按 ${isMacPlatform ? "Cmd" : "Ctrl"}+V 粘贴新建`);
+  return true;
+}
+async function pasteCopiedSession() {
+  if (duplicatingSession || !copiedSessionId) return;
+  duplicatingSession = true;
+  try {
+    const result = await api.duplicateSession(copiedSessionId);
+    sessions = result.sessions;
+    selectedSessionId = result.duplicatedId;
+    renderSessions();
+    const row = [...$("#sessions").querySelectorAll(".session")]
+      .find((item) => item.dataset.sessionId === result.duplicatedId);
+    row?.scrollIntoView({ block: "nearest" });
+    row?.focus();
+    const created = sessions.find((s) => s.id === result.duplicatedId);
+    if (created) toast(`已粘贴会话「${created.name}」`);
+  } catch (error) {
+    toast(error.message);
+  } finally {
+    duplicatingSession = false;
+  }
+}
 function renderSessions() {
   $("#welcome-new").textContent = sessions.length
     ? "＋ 新建会话"
     : "＋ 添加第一台服务器";
+  if (selectedSessionId && !sessions.some((s) => s.id === selectedSessionId))
+    selectedSessionId = null;
   const list = $("#sessions");
+  list.tabIndex = -1;
   list.replaceChildren();
   const q = $("#search").value.toLowerCase();
   const filtered = sessions.filter((s) =>
@@ -222,8 +264,13 @@ function renderSessions() {
     list.append(el("div", "group-heading", group));
     for (const s of filtered.filter((s) => (s.group || "未分组") === group)) {
       const row = el("div", "session");
+      row.dataset.sessionId = s.id;
       row.tabIndex = 0;
-      row.title = "双击连接";
+      row.setAttribute("role", "option");
+      const active = s.id === selectedSessionId;
+      row.classList.toggle("selected", active);
+      row.setAttribute("aria-selected", String(active));
+      row.title = `双击连接 · ${isMacPlatform ? "Cmd" : "Ctrl"}+C 复制，${isMacPlatform ? "Cmd" : "Ctrl"}+V 粘贴`;
       row.append(el("span", "server-icon", "▤"));
       const info = el("div", "session-info");
       info.append(
@@ -253,14 +300,42 @@ function renderSessions() {
         tools.append(b);
       }
       row.append(tools);
+      row.onclick = () => selectSessionRow(s.id, { focus: true });
+      row.onfocus = () => {
+        if (selectedSessionId !== s.id) selectSessionRow(s.id, { focus: false });
+      };
       row.ondblclick = () => connect(s);
       row.onkeydown = (e) => {
         if (e.key === "Enter") connect(s);
+        else if (e.key === "ArrowDown" || e.key === "ArrowUp") {
+          e.preventDefault();
+          const rows = [...list.querySelectorAll(".session")];
+          const index = rows.indexOf(row);
+          if (index < 0 || !rows.length) return;
+          const next = rows[(index + (e.key === "ArrowDown" ? 1 : -1) + rows.length) % rows.length];
+          selectSessionRow(next.dataset.sessionId, { focus: true });
+        }
       };
       list.append(row);
     }
   }
 }
+$("#session-panel").addEventListener("keydown", (e) => {
+  if (e.isComposing || e.keyCode === 229 || document.querySelector("dialog[open]")) return;
+  if (e.target.closest("input, textarea, select")) return;
+  if (window.getSelection()?.toString()) return;
+  const primary = isMacPlatform ? e.metaKey && !e.ctrlKey : e.ctrlKey && !e.metaKey;
+  if (!primary || e.altKey || e.shiftKey) return;
+  const key = typeof e.key === "string" ? e.key.toLowerCase() : "";
+  if (e.code === "KeyC" || key === "c") {
+    if (copySelectedSession()) e.preventDefault();
+  } else if (e.code === "KeyV" || key === "v") {
+    if (copiedSessionId) {
+      e.preventDefault();
+      if (!e.repeat) pasteCopiedSession();
+    }
+  }
+});
 function edit(s = {}) {
   const form = $("#session-form");
   form.reset();

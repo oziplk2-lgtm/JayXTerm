@@ -1,5 +1,13 @@
 # 初版验证记录
 
+## 2026-11-25：屏幕取色器、会话列表 `Ctrl+C` / `Ctrl+V` 复制粘贴与终端快捷键
+
+- 新增全屏屏幕取色器（`color-picker.html`、`src/color-picker.js`、`src/color-picker-preload.cjs`、`src/color-picker-utils.mjs`）与可编辑十六进制色值输入框：突破 Chromium 原生 `<input type="color">` 吸管仅限应用窗口内的限制，支持高 DPI 缩放坐标采样、放大镜准星预览、5 秒截图超时与 `ready` 握手兜底。
+- 新增会话列表两步复制粘贴（`src/session-duplicate.cjs`、`sessions:duplicate` IPC 与 `src/renderer.js`）：支持单击与方向键选中会话、按 `Ctrl+C`（macOS `Cmd+C`）记录并按 `Ctrl+V`（macOS `Cmd+V`）在原位置后生成去重副本，主进程直接克隆加密密码密文，不向渲染进程或系统剪贴板暴露明文；不影响搜索框文本复制及终端快捷键。
+- 单元测试 `powershell -ExecutionPolicy Bypass -File scripts/windows.ps1 test`：51 项全部通过（新增 `src/color-picker-utils.test.cjs` 3 项、`src/session-duplicate.test.cjs` 2 项）。
+- 完整 Electron Smoke 回归（移除 `ELECTRON_RUN_AS_NODE` 后启用 `JAYXTERM_CLIPBOARD_QA=1`、`JAYXTERM_LOCAL_DRAG_QA=1`、`JAYXTERM_WORKSPACE_QA=1`、`JAYXTERM_SESSION_EXCHANGE_QA=1`、`JAYXTERM_SETTINGS_QA=1`、`JAYXTERM_FEATURES_QA=1`、`JAYXTERM_ASSIST_QA=1`）：26.2 秒全部通过，`settings-check.cjs` 覆盖 Hex 输入预览联动及会话列表 `Ctrl+C` + `Ctrl+V` 复制粘贴与加密密码保留。
+- 屏幕取色窗口端到端检查（mock `desktopCapturer` 屏幕位图）：验证全屏取色窗口加载、像素采样 `#1E90FF` 并回填设置页颜色选择器与 Hex 输入框成功。
+
 ## 2026-11-25：终端 Ctrl+C / Ctrl+V 复制粘贴（VS Code 风格）
 
 - 分支 `feat/ctrl-cv-clipboard`：在 `src/terminal-clipboard.mjs` 实现快捷键动作解析，在 `src/renderer.js` 通过 `term.attachCustomKeyEventHandler` 接入 xterm 实例并复用 `terminalClipboard`，同时保留右键菜单复制/粘贴及浏览器原生 `copy` / `paste` 事件拦截（防止隐藏 textarea 触发双倍粘贴）。

@@ -50,8 +50,17 @@ async function check(w) {
         throw new Error("Title bar window menu did not open");
       $("#window-tools-options").hidePopover();
       await open();
+      const hexInput = $("#settings-background-value");
+      if (!$("#settings-pick-color") || hexInput.value !== "#394351")
+        throw new Error("Missing screen color picker button or hex input");
+      hexInput.value = "#123456";
+      hexInput.dispatchEvent(new Event("input"));
+      if (pickerColor.value !== "#123456" || color() !== "rgb(18, 52, 86)")
+        throw new Error("Hex color input did not update preview");
       pickerColor.value = "#224466";
       pickerColor.dispatchEvent(new Event("input"));
+      if (hexInput.value !== "#224466")
+        throw new Error("Color input did not sync hex field");
       if (color() !== "rgb(34, 68, 102)" || terminal() !== "rgb(34, 68, 102)" ||
           getComputedStyle($(".terminal-pane.active .xterm-viewport")).backgroundColor !== terminal())
         throw new Error("Background preview did not update the terminal and workspace");
@@ -150,6 +159,48 @@ async function check(w) {
       $("#new").click();
       await wait(() => $("#session-password-history").textContent.includes("未开启"));
       $("#editor-cancel").click();
+
+      $("#mode-sessions").click();
+      const row = [...document.querySelectorAll("#sessions .session")]
+        .find(el => el.textContent.includes("本地验收服务器"));
+      if (!row) throw new Error("Saved session row missing");
+      row.click();
+      if (!row.classList.contains("selected"))
+        throw new Error("Clicking session row did not mark it selected");
+    `);
+    w.show();
+    w.focus();
+    const mod = process.platform === "darwin" ? 4 : 2;
+    w.webContents.debugger.attach("1.3");
+    try {
+      for (const [key, code, virtual] of [["c", "KeyC", 67], ["v", "KeyV", 86]]) {
+        for (const type of ["keyDown", "keyUp"]) {
+          await w.webContents.debugger.sendCommand("Input.dispatchKeyEvent", {
+            type, key, code, windowsVirtualKeyCode: virtual, modifiers: mod,
+          });
+        }
+        await new Promise(resolve => setTimeout(resolve, 120));
+      }
+    } finally {
+      w.webContents.debugger.detach();
+    }
+    await run(`
+      await wait(async () => (await api.sessions()).some(s => s.name === "本地验收服务器 - 副本"));
+      const list = await api.sessions();
+      const copy = list.find(s => s.name === "本地验收服务器 - 副本");
+      if (!copy?.hasPassword || copy.password)
+        throw new Error("Duplicated session credential state is invalid");
+      if (await api.reveal(copy.id) !== "qa-password")
+        throw new Error("Duplicated session did not preserve encrypted password");
+      const copyRow = [...document.querySelectorAll("#sessions .session")]
+        .find(el => el.dataset.sessionId === copy.id);
+      if (!copyRow?.classList.contains("selected"))
+        throw new Error("Pasted session row was not rendered and selected");
+      copyRow.querySelectorAll(".session-tools button")[2].click();
+      await wait(() => $("#confirm-dialog").open);
+      $("#delete-confirm").click();
+      await wait(() => !$("#confirm-dialog").open);
+      await wait(async () => !(await api.sessions()).some(s => s.id === copy.id));
     `);
     assert.ok(asked, "Migration confirmation did not open");
     const stored = fs.readFileSync(".codex-cache/qa/profile/settings.json", "utf8");

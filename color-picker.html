@@ -1,0 +1,92 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="UTF-8" />
+    <meta
+      http-equiv="Content-Security-Policy"
+      content="default-src 'self'; img-src 'self' data:; style-src 'self' 'unsafe-inline'; script-src 'self'"
+    />
+    <title>屏幕取色</title>
+    <style>
+      html,
+      body {
+        margin: 0;
+        padding: 0;
+        width: 100%;
+        height: 100%;
+        overflow: hidden;
+        background: #000;
+        user-select: none;
+      }
+      #screen {
+        display: block;
+        width: 100vw;
+        height: 100vh;
+        cursor: crosshair;
+      }
+      #loupe {
+        position: fixed;
+        pointer-events: none;
+        display: none;
+        width: 132px;
+        border-radius: 10px;
+        overflow: hidden;
+        background: rgba(20, 24, 30, 0.92);
+        border: 1px solid rgba(255, 255, 255, 0.25);
+        box-shadow: 0 10px 28px rgba(0, 0, 0, 0.55);
+        color: #f3f6fa;
+        font: 12px/1.35 "Segoe UI", "Microsoft YaHei", sans-serif;
+      }
+      #zoom {
+        display: block;
+        width: 132px;
+        height: 132px;
+        image-rendering: pixelated;
+      }
+      #meta {
+        display: flex;
+        align-items: center;
+        gap: 8px;
+        padding: 6px 8px;
+        border-top: 1px solid rgba(255, 255, 255, 0.14);
+      }
+      #swatch {
+        width: 16px;
+        height: 16px;
+        border-radius: 4px;
+        border: 1px solid rgba(255, 255, 255, 0.35);
+        flex-shrink: 0;
+      }
+      #hex {
+        font-family: Consolas, monospace;
+        font-size: 12px;
+        letter-spacing: 0.4px;
+      }
+      #hint {
+        position: fixed;
+        top: 14px;
+        left: 50%;
+        transform: translateX(-50%);
+        pointer-events: none;
+        padding: 6px 12px;
+        border-radius: 999px;
+        background: rgba(20, 24, 30, 0.85);
+        border: 1px solid rgba(255, 255, 255, 0.18);
+        color: #eef2f6;
+        font: 12px/1.4 "Segoe UI", "Microsoft YaHei", sans-serif;
+      }
+    </style>
+  </head>
+  <body>
+    <canvas id="screen"></canvas>
+    <div id="loupe" aria-hidden="true">
+      <canvas id="zoom" width="132" height="132"></canvas>
+      <div id="meta">
+        <span id="swatch"></span>
+        <span id="hex">#000000</span>
+      </div>
+    </div>
+    <div id="hint">移动鼠标取色，左键确认 · 右键或 Esc 取消</div>
+    <script type="module" src="/src/color-picker.js"></script>
+  </body>
+</html>

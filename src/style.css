@@ -163,6 +163,10 @@ button.primary:hover {
   background: var(--hover);
   border-color: var(--page-line);
 }
+.session.selected {
+  background: var(--page-selection);
+  border-color: color-mix(in srgb, var(--accent) 55%, var(--page-line));
+}
 .server-icon {
   width: 28px;
   height: 31px;
@@ -1007,13 +1011,19 @@ dialog pre {
   align-items: center;
   gap: 9px;
 }
-.settings-color-row input {
+.settings-color-row .settings-color-input {
   width: 44px;
   height: 31px;
   padding: 3px;
 }
-.settings-color-row output { color: var(--muted); font-family: Consolas, monospace; }
-.settings-color-row button { margin-left: auto; }
+.settings-color-row .settings-hex-input {
+  width: 92px;
+  height: 31px;
+  padding: 0 8px;
+  color: var(--ink);
+  font-family: Consolas, monospace;
+}
+#settings-default-background { margin-left: auto; }
 #settings-dialog { width: min(800px, calc(100vw - 32px)); padding: 0; max-height: calc(100vh - 40px); }
 #settings-form { display: flex; flex-direction: column; max-height: calc(100vh - 40px); }
 .settings-heading { padding: 22px 26px 18px; border-bottom: 1px solid var(--line); }

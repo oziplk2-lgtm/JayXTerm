@@ -7,6 +7,8 @@ const {
   Menu,
   clipboard,
   session,
+  desktopCapturer,
+  screen,
 } = require("electron");
 const { createWindows } = require("./windows.cjs");
 const { normalizeEncoding } = require("./codec.cjs");
@@ -19,6 +21,7 @@ const { existsSync } = require("node:fs");
 const { fork } = require("node:child_process");
 const { randomUUID } = require("node:crypto");
 const { openStore, validateSession } = require("./store.cjs");
+const { buildDuplicatedSession } = require("./session-duplicate.cjs");
 const { openAppSettings, validBackground } = require("./app-settings.cjs");
 const { openPasswordVault } = require("./password-vault.cjs");
 const { createTheme } = require("./theme.mjs");
@@ -365,6 +368,106 @@ function themeWindow(win, color) {
 ipcMain.on("window:theme", (event, color) => {
   if (validBackground(color)) themeWindow(BrowserWindow.fromWebContents(event.sender), color);
 });
+let activeColorPicker = null;
+ipcMain.handle("settings:pick-color", async (event) => {
+  if (activeColorPicker) throw new Error("屏幕取色器已打开");
+  const parent = BrowserWindow.fromWebContents(event.sender);
+  if (!parent || parent.isDestroyed()) return null;
+  const display = screen.getDisplayMatching(parent.getBounds());
+  const scale = display.scaleFactor || 1;
+  const pixelWidth = Math.max(1, Math.round(display.bounds.width * scale));
+  const pixelHeight = Math.max(1, Math.round(display.bounds.height * scale));
+  let captureTimer;
+  const sources = await Promise.race([
+    desktopCapturer.getSources({
+      types: ["screen"],
+      thumbnailSize: { width: pixelWidth, height: pixelHeight },
+    }),
+    new Promise((_, reject) => {
+      captureTimer = setTimeout(() => reject(new Error("获取屏幕画面超时，请重试")), 5000);
+    }),
+  ]).finally(() => clearTimeout(captureTimer));
+  const source =
+    sources.find((item) => String(item.display_id) === String(display.id)) ||
+    sources[0];
+  if (!source || source.thumbnail.isEmpty())
+    throw new Error("无法获取屏幕画面，请检查系统屏幕录制权限");
+
+  const picker = new BrowserWindow({
+    x: display.bounds.x,
+    y: display.bounds.y,
+    width: display.bounds.width,
+    height: display.bounds.height,
+    frame: false,
+    resizable: false,
+    movable: false,
+    minimizable: false,
+    maximizable: false,
+    skipTaskbar: true,
+    alwaysOnTop: true,
+    hasShadow: false,
+    enableLargerThanScreen: true,
+    show: false,
+    backgroundColor: "#000000",
+    webPreferences: {
+      preload: path.join(__dirname, "color-picker-preload.cjs"),
+      session: parent.webContents.session,
+      nodeIntegration: false,
+      contextIsolation: true,
+      sandbox: true,
+    },
+  });
+  activeColorPicker = picker;
+  picker.webContents.setWindowOpenHandler(() => ({ action: "deny" }));
+  picker.webContents.on("will-navigate", (e) => e.preventDefault());
+
+  return await new Promise((resolve) => {
+    let settled = false;
+    let initialized = false;
+    const finish = (color) => {
+      if (settled) return;
+      settled = true;
+      activeColorPicker = null;
+      ipcMain.removeListener("color-picker:ready", onReady);
+      ipcMain.removeListener("color-picker:result", onResult);
+      parent.removeListener("closed", onParentClosed);
+      if (!picker.isDestroyed()) picker.destroy();
+      if (!parent.isDestroyed()) parent.focus();
+      resolve(validBackground(color) ? color.toLowerCase() : null);
+    };
+    const sendScreen = () => {
+      if (initialized || settled || picker.isDestroyed()) return;
+      initialized = true;
+      picker.setBounds(display.bounds);
+      picker.setAlwaysOnTop(true, "screen-saver");
+      picker.webContents.send("color-picker:init", {
+        dataUrl: source.thumbnail.toDataURL(),
+        width: pixelWidth,
+        height: pixelHeight,
+      });
+      picker.show();
+      picker.focus();
+    };
+    const onReady = (e) => {
+      if (e.sender === picker.webContents) sendScreen();
+    };
+    const onResult = (e, color) => {
+      if (e.sender === picker.webContents) finish(color);
+    };
+    const onParentClosed = () => finish(null);
+    ipcMain.on("color-picker:ready", onReady);
+    ipcMain.on("color-picker:result", onResult);
+    parent.once("closed", onParentClosed);
+    picker.once("closed", () => finish(null));
+    picker.webContents.once("did-fail-load", () => finish(null));
+    picker
+      .loadFile(
+        path.join(__dirname, "../.codex-cache/build/renderer/color-picker.html"),
+      )
+      .then(() => sendScreen())
+      .catch(() => finish(null));
+  });
+});
 ipcMain.handle("settings:choose-cache", async (event) => {
   const result = await dialog.showOpenDialog(BrowserWindow.fromWebContents(event.sender), {
     title: "选择缓存所在的文件夹",
@@ -511,6 +614,17 @@ ipcMain.handle("sessions:save", (e, input) => {
   recordPassword(input.password, BrowserWindow.fromWebContents(e.sender));
   workspace.broadcast({ type: "sessions-changed" }, e.sender.id);
   return safeSessions();
+});
+ipcMain.handle("sessions:duplicate", (e, id) => {
+  const d = store.get();
+  const index = d.sessions.findIndex((x) => x.id === id);
+  if (index < 0) throw new Error("原会话不存在");
+  const copy = buildDuplicatedSession(d.sessions[index], d.sessions, randomUUID());
+  const next = [...d.sessions];
+  next.splice(index + 1, 0, copy);
+  store.write({ ...d, sessions: next });
+  workspace.broadcast({ type: "sessions-changed" }, e.sender.id);
+  return { sessions: safeSessions(), duplicatedId: copy.id };
 });
 ipcMain.handle("sessions:delete", (e, id) => {
   const d = store.get();

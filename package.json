@@ -49,6 +49,8 @@
       "src/remote-text.cjs",
       "src/editor-windows.cjs",
       "src/editor-preload.cjs",
+      "src/color-picker-preload.cjs",
+      "src/session-duplicate.cjs",
       "src/store.cjs",
       "src/session-exchange.cjs",
       "src/app-settings.cjs",

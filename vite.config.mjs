@@ -8,6 +8,7 @@ export default defineConfig({
       input: {
         workspace: resolve(import.meta.dirname, "index.html"),
         editor: resolve(import.meta.dirname, "editor.html"),
+        colorPicker: resolve(import.meta.dirname, "color-picker.html"),
       },
     },
   },
