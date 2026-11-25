@@ -325,6 +325,28 @@ function copySelectedSession() {
   toast(`已复制会话「${target.name}」，在会话列表按 ${isMacPlatform ? "Cmd" : "Ctrl"}+V 粘贴新建`);
   return true;
 }
+const COLLAPSED_GROUPS_KEY = "jayxterm:collapsed-groups";
+function loadCollapsedGroups() {
+  try {
+    const raw = localStorage.getItem(COLLAPSED_GROUPS_KEY);
+    const parsed = raw ? JSON.parse(raw) : [];
+    return new Set(Array.isArray(parsed) ? parsed.filter((item) => typeof item === "string") : []);
+  } catch {
+    return new Set();
+  }
+}
+const collapsedGroups = loadCollapsedGroups();
+function saveCollapsedGroups() {
+  try {
+    localStorage.setItem(COLLAPSED_GROUPS_KEY, JSON.stringify([...collapsedGroups]));
+  } catch {
+    // Ignore storage quota / privacy mode failures.
+  }
+}
+function expandSessionGroup(group) {
+  const key = (group || "").trim() || "未分组";
+  if (collapsedGroups.delete(key)) saveCollapsedGroups();
+}
 async function pasteCopiedSession() {
   if (duplicatingSession || !copiedSessionId) return;
   duplicatingSession = true;
@@ -332,12 +354,13 @@ async function pasteCopiedSession() {
     const result = await api.duplicateSession(copiedSessionId);
     sessions = result.sessions;
     selectedSessionId = result.duplicatedId;
+    const created = sessions.find((s) => s.id === result.duplicatedId);
+    if (created) expandSessionGroup(created.group);
     renderSessions();
     const row = [...$("#sessions").querySelectorAll(".session")]
       .find((item) => item.dataset.sessionId === result.duplicatedId);
     row?.scrollIntoView({ block: "nearest" });
     row?.focus();
-    const created = sessions.find((s) => s.id === result.duplicatedId);
     if (created) toast(`已粘贴会话「${created.name}」`);
   } catch (error) {
     toast(error.message);
@@ -354,7 +377,7 @@ function renderSessions() {
   const list = $("#sessions");
   list.tabIndex = -1;
   list.replaceChildren();
-  const q = $("#search").value.toLowerCase();
+  const q = $("#search").value.trim().toLowerCase();
   const filtered = sessions.filter((s) =>
     [s.name, s.host, s.username, s.group].join(" ").toLowerCase().includes(q),
   );
@@ -370,8 +393,28 @@ function renderSessions() {
     );
   const groups = [...new Set(filtered.map((s) => s.group || "未分组"))].sort();
   for (const group of groups) {
-    list.append(el("div", "group-heading", group));
-    for (const s of filtered.filter((s) => (s.group || "未分组") === group)) {
+    const groupSessions = filtered.filter((s) => (s.group || "未分组") === group);
+    const collapsed = !q && collapsedGroups.has(group);
+    const heading = el("button", "group-heading");
+    heading.type = "button";
+    heading.dataset.group = group;
+    heading.setAttribute("aria-expanded", String(!collapsed));
+    heading.title = collapsed ? "展开分组" : "折叠分组";
+    heading.append(
+      el("span", "group-chevron", "▾"),
+      el("span", "group-name", group),
+      el("span", "group-count", String(groupSessions.length)),
+    );
+    heading.onclick = () => {
+      if (q) return;
+      if (collapsedGroups.has(group)) collapsedGroups.delete(group);
+      else collapsedGroups.add(group);
+      saveCollapsedGroups();
+      renderSessions();
+    };
+    list.append(heading);
+    if (collapsed) continue;
+    for (const s of groupSessions) {
       const row = el("div", "session");
       row.dataset.sessionId = s.id;
       row.tabIndex = 0;
@@ -576,6 +619,7 @@ $("#session-form").onsubmit = async (e) => {
     const s = Object.fromEntries(new FormData(form));
     s.remember = form.elements.remember.checked;
     sessions = await api.save(s);
+    expandSessionGroup(s.group);
     $("#editor").close();
     renderSessions();
   } catch (err) {

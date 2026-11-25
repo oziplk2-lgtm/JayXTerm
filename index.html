@@ -89,12 +89,16 @@
         </aside>
         <main>
           <form id="terminal-search" class="terminal-search" role="search" aria-label="搜索当前终端" hidden>
-            <input id="terminal-search-input" type="search" placeholder="搜索当前终端及历史输出" aria-label="终端搜索内容" autocomplete="off" maxlength="1000" />
-            <button id="terminal-search-case" type="button" aria-label="区分大小写" title="区分大小写" aria-pressed="false">Aa</button>
+            <div class="terminal-search-field">
+              <input id="terminal-search-input" type="search" placeholder="查找" aria-label="终端搜索内容" autocomplete="off" maxlength="1000" />
+              <button id="terminal-search-case" type="button" aria-label="区分大小写" title="区分大小写" aria-pressed="false">Aa</button>
+            </div>
             <output id="terminal-search-count" aria-live="polite">0 / 0</output>
-            <button id="terminal-search-previous" type="button" aria-label="上一个匹配" title="上一个（Shift+Enter）">↑</button>
-            <button id="terminal-search-next" type="button" aria-label="下一个匹配" title="下一个（Enter）">↓</button>
-            <button id="terminal-search-close" type="button" aria-label="关闭终端搜索" title="关闭（Esc）">×</button>
+            <div class="terminal-search-actions">
+              <button id="terminal-search-previous" type="button" aria-label="上一个匹配" title="上一个匹配（Shift+Enter）"><svg viewBox="0 0 16 16" aria-hidden="true"><path d="M8 12.5V3.5M4.5 7 8 3.5 11.5 7"/></svg></button>
+              <button id="terminal-search-next" type="button" aria-label="下一个匹配" title="下一个匹配（Enter）"><svg viewBox="0 0 16 16" aria-hidden="true"><path d="M8 3.5v9M4.5 9 8 12.5 11.5 9"/></svg></button>
+              <button id="terminal-search-close" type="button" aria-label="关闭终端搜索" title="关闭（Esc）"><svg viewBox="0 0 16 16" aria-hidden="true"><path d="M4.5 4.5 11.5 11.5M11.5 4.5 4.5 11.5"/></svg></button>
+            </div>
           </form>
           <div id="welcome" class="welcome">
             <div class="welcome-inner">

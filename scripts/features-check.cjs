@@ -167,6 +167,34 @@ async function check(win, fixture) {
     await waitFor(() => fixture.streams.size === originalStreams.size);
     assert.ok([...originalStreams].every((stream) => fixture.streams.has(stream)));
 
+    // Verify collapsible session groups (collapse hides that group's rows, search auto-expands, click restores).
+    await run(`
+      $('#mode-sessions').click();
+      await wait(() => !!$('.group-heading'));
+      const findTargetRow = () => [...document.querySelectorAll('#sessions .session')].find(r => r.textContent.includes('本地验收服务器'));
+      await wait(() => !!findTargetRow());
+      let heading = findTargetRow().previousElementSibling;
+      while (heading && !heading.classList.contains('group-heading')) heading = heading.previousElementSibling;
+      if (!heading) throw new Error('Missing group heading for target session');
+      const groupName = heading.dataset.group;
+      const getHeading = () => [...document.querySelectorAll('.group-heading')].find(h => h.dataset.group === groupName);
+      if (getHeading().getAttribute('aria-expanded') !== 'true') throw new Error('Group should start expanded');
+      const groupCount = Number(getHeading().querySelector('.group-count').textContent);
+      const beforeTotal = document.querySelectorAll('#sessions .session').length;
+      getHeading().click();
+      await wait(() => getHeading().getAttribute('aria-expanded') === 'false');
+      if (findTargetRow() || document.querySelectorAll('#sessions .session').length !== beforeTotal - groupCount)
+        throw new Error('Collapsed group still rendered its sessions');
+      $('#search').value = '本地验收服务器';
+      $('#search').dispatchEvent(new Event('input'));
+      await wait(() => !!findTargetRow());
+      $('#search').value = '';
+      $('#search').dispatchEvent(new Event('input'));
+      await wait(() => !findTargetRow());
+      getHeading().click();
+      await wait(() => getHeading().getAttribute('aria-expanded') === 'true' && !!findTargetRow() && document.querySelectorAll('#sessions .session').length === beforeTotal);
+    `);
+
     // Reuse the live credentials after removing the saved session; never ask for its password again.
     const saved = await run("return (await api.sessions()).find(item => item.name === '本地验收服务器');");
     await run(`await api.remove(${JSON.stringify(saved.id)});`);
@@ -185,7 +213,7 @@ async function check(win, fixture) {
     other.close(); other = null;
     console.log("PASS: native tab duplication, independent SSH authentication, current path, GBK and live credentials");
 
-    // Verify top light-blue tab indicator without blue text highlight, plus tab & window rename.
+    // Verify VS Code-style active tab (seamless terminal background, top light-blue bar without text highlight) plus tab & window rename.
     const tabStyles = await run(`
       const tab = $('.terminal-group.focused .tab.active');
       const style = getComputedStyle(tab);
@@ -193,6 +221,7 @@ async function check(win, fixture) {
         topWidth: style.borderTopWidth,
         topColor: style.borderTopColor,
         bottomWidth: style.borderBottomWidth,
+        backgroundColor: style.backgroundColor,
         color: style.color,
       };
     `);
@@ -201,6 +230,7 @@ async function check(win, fixture) {
     assert.equal(tabStyles.topWidth, "2px");
     assert.equal(tabStyles.topColor, rgbStr(currentTheme.accent));
     assert.equal(tabStyles.bottomWidth, "0px");
+    assert.equal(tabStyles.backgroundColor, rgbStr(currentTheme.background));
     assert.equal(tabStyles.color, rgbStr(currentTheme.ink));
 
     let hasRenameItem = false;

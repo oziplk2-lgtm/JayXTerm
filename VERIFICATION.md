@@ -1,5 +1,12 @@
 # 初版验证记录
 
+## 2026-11-25（0.10.10）：可折叠会话分组、VS Code 风格标签页与终端搜索框
+
+- 可折叠会话分组：`src/renderer.js` 与 `src/style.css` 将 `.group-heading` 升级为带旋转箭头与条目计数的可点击折叠按钮，折叠状态持久化到 `localStorage`；搜索过滤时自动临时展开命中分组，新建或复制粘贴会话自动展开目标分组。
+- VS Code 风格标签页：`src/style.css` 区分标签栏底色与活动标签背景（活动标签采用 `--terminal-bg` 与终端正文无缝贯通，保留顶部 2px 浅蓝指示线与无蓝色字体高亮，增加左右细边线与非活动标签竖向分隔线，关闭按钮按需显现）。
+- VS Code 风格底部搜索框：`index.html` 与 `src/style.css` 重构 `#terminal-search`，将 `Aa` 大小写开关内嵌至 `.terminal-search-field` 右侧、改为 1px 聚焦边框，并替换上下匹配与关闭按钮为紧凑扁平 SVG 图标，完整保留既有 DOM ID 与键盘导航交互。
+- 验证：54 项单元测试（1.1 秒）与完整 CI Smoke（26.1 秒）全部通过；`scripts/features-check.cjs` 新增分组折叠/搜索临时展开/恢复校验及活动标签背景与终端无缝衔接断言，`scripts/terminal-assistance-check.cjs` 全部通过并核对渲染截图。
+
 ## 2026-11-25（0.10.9）：会话标签顶部浅蓝横线、标签与主窗口重命名
 
 - 样式调整：`src/style.css` 将 `.tab` 的指示边线由 `border-bottom` 改为 `border-top: 2px solid transparent`，焦点标签 `.terminal-group.focused .tab.active` 仅设置 `border-top-color: var(--accent)`，移除 `color: var(--accent)` 字体高亮，文字保持 `var(--ink)`。
