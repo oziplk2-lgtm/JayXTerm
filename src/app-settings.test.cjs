@@ -26,10 +26,11 @@ function setup(t) {
 test("password history is opt-in, encrypted separately, deduplicated, and cleared on disable", (t) => {
   const { file, open } = setup(t);
   let settings = open();
-  assert.equal(settings.describe().backgroundColor, "#394351");
+  assert.equal(settings.describe().backgroundColor, "#181818");
+  assert.equal(settings.describe().fileOpen, "single");
   settings.record("132exampleio");
   assert.deepEqual(settings.listHistory(), { enabled: false, items: [] });
-  settings.apply({ cachePath: "", saveHistory: true, fileOpen: "single", backgroundColor: "#253448" });
+  settings.apply({ cachePath: "", saveHistory: true, fileOpen: "double", backgroundColor: "#253448" });
   settings.record("132exampleio");
   settings = open();
   assert.equal(settings.describe().backgroundColor, "#253448");
@@ -38,9 +39,9 @@ test("password history is opt-in, encrypted separately, deduplicated, and cleare
   assert.equal(items.length, 1);
   assert.match(items[0].label, /^13\*+io$/);
   assert.equal(settings.selectPassword(items[0].id), "132exampleio");
-  assert.equal(settings.describe().fileOpen, "single");
+  assert.equal(settings.describe().fileOpen, "double");
   assert.equal(fs.readFileSync(file, "utf8").includes("132exampleio"), false);
-  settings.apply({ cachePath: "", saveHistory: false, fileOpen: "double" });
+  settings.apply({ cachePath: "", saveHistory: false, fileOpen: "single" });
   settings = open();
   assert.deepEqual(settings.listHistory(), { enabled: false, items: [] });
   assert.equal(settings.selectPassword(items[0].id), "");
@@ -50,15 +51,15 @@ test("only legacy defaults follow the new workspace background", (t) => {
   const { file, profile, open } = setup(t);
   fs.mkdirSync(profile);
   fs.writeFileSync(file, JSON.stringify({ backgroundColor: "#eff1f5" }));
-  assert.equal(open().describe().backgroundColor, "#394351");
+  assert.equal(open().describe().backgroundColor, "#181818");
   fs.writeFileSync(file, JSON.stringify({ backgroundColor: "#284362" }));
   const settings = open();
   assert.equal(settings.describe().backgroundColor, "#284362");
-  const update = { cachePath: "", saveHistory: false, fileOpen: "double" };
+  const update = { cachePath: "", saveHistory: false, fileOpen: "single" };
   settings.apply({ ...update, backgroundColor: "#eff1f5" });
   assert.equal(open().describe().backgroundColor, "#eff1f5");
-  settings.apply({ ...update, backgroundColor: "#394351" });
-  assert.equal(open().describe().backgroundColor, "#394351");
+  settings.apply({ ...update, backgroundColor: "#181818" });
+  assert.equal(open().describe().backgroundColor, "#181818");
 });
 test("terminal preferences migrate, persist, validate and survive unrelated setting updates", (t) => {
   const { file, open } = setup(t);

@@ -1,5 +1,12 @@
 # 初版验证记录
 
+## 2026-11-25：VS Code 风格主题字体、默认单击打开与终端 `Ctrl+左键` 打开文件
+
+- 配色与字体：`src/theme.mjs`、`src/app-settings.cjs` 与 `src/terminal-settings.mjs` 默认切换为 `#181818` 背景、`#cccccc` 前景、`#264f78` 选区蓝及 VS Code `terminalColorRegistry.ts` ANSI 16 色板；默认字体保持 `Cascadia Mono` 并补充 `Consolas, "Courier New", monospace` 回退链；默认文件和目录打开方式调整为 `"single"`（单击打开）。
+- 终端 `Ctrl + 左键` 打开文件：新增 `src/terminal-file-links.mjs`、`sftp:stat-target` IPC（`src/ssh-worker.cjs`、`src/main.cjs`、`src/preload.cjs`）及 `src/renderer.js` `term.registerLinkProvider`；支持绝对路径、相对路径（自动拼接 Shell 当前目录）、`~/` 及 `:line[:col]` 后缀，按住 `Ctrl`/`Cmd` 悬停显示下划线与手型光标，点击后文件直接弹出 Monaco 远程编辑器、目录在文件列表定位进入。
+- 单元测试 `powershell -ExecutionPolicy Bypass -File scripts/windows.ps1 test`：54 项全部通过（含 `src/terminal-file-links.test.cjs` 3 项以及更新后的 `theme.test.cjs`、`app-settings.test.cjs`）。
+- 完整 Electron Smoke 回归（开启 `JAYXTERM_CLIPBOARD_QA=1`、`JAYXTERM_EDITOR_QA=1`、`JAYXTERM_LOCAL_DRAG_QA=1`、`JAYXTERM_WORKSPACE_QA=1`、`JAYXTERM_SESSION_EXCHANGE_QA=1`、`JAYXTERM_SETTINGS_QA=1`、`JAYXTERM_FEATURES_QA=1`、`JAYXTERM_ASSIST_QA=1`）：29.3 秒全部通过；`settings-check.cjs` 真实派发 `Ctrl + 鼠标左键` 点击终端输出 `/home/jay/README.md` 成功打开 Monaco 远程编辑器。
+
 ## 2026-11-25：屏幕取色器、会话列表 `Ctrl+C` / `Ctrl+V` 复制粘贴与终端快捷键
 
 - 新增全屏屏幕取色器（`color-picker.html`、`src/color-picker.js`、`src/color-picker-preload.cjs`、`src/color-picker-utils.mjs`）与可编辑十六进制色值输入框：突破 Chromium 原生 `<input type="color">` 吸管仅限应用窗口内的限制，支持高 DPI 缩放坐标采样、放大镜准星预览、5 秒截图超时与 `ready` 握手兜底。

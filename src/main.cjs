@@ -694,6 +694,12 @@ ipcMain.handle("sftp:list", (e, { id, path: remote }) => {
   ensureOwner(e.sender, id);
   return request({ id, action: "list", path: remote });
 });
+ipcMain.handle("sftp:stat-target", (e, { id, path: target, resolveHome }) => {
+  ensureOwner(e.sender, id);
+  if (typeof target !== "string" || !target || target.includes("\0") || target.length > 4096)
+    throw new Error("无效的远端路径");
+  return request({ id, action: "stat-target", path: target, resolveHome: !!resolveHome });
+});
 ipcMain.handle("sftp:remove", async (event, { id, path: remote }) => {
   ensureOwner(event.sender, id);
   validateRemoteRemoval(remote);

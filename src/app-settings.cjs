@@ -5,12 +5,12 @@ const { openStore } = require("./store.cjs");
 const { terminalDefaults, terminalEncodings, validFontFamily, validCjkFontFamily, validFontSize } = require("./terminal-settings.mjs");
 
 const cacheFolders = ["Cache", "Code Cache", "GPUCache", "DawnGraphiteCache", "DawnWebGPUCache", "ShaderCache"];
-const defaultBackground = "#394351";
+const defaultBackground = "#181818";
 const validBackground = (color) => typeof color === "string" && /^#[\da-f]{6}$/i.test(color);
 const defaults = {
   ...terminalDefaults,
   cachePath: "", pendingCache: null, cacheError: "",
-  saveHistory: false, passwordHistory: [], fileOpen: "double", workspaceBackground: null,
+  saveHistory: false, passwordHistory: [], fileOpen: "single", workspaceBackground: null,
 };
 
 function contains(parent, child) {

@@ -42,6 +42,7 @@ contextBridge.exposeInMainWorld("api", {
   duplicate: (s) => ipcRenderer.invoke("ssh:duplicate", s),
   send: (m) => ipcRenderer.send("ssh:send", m),
   list: (s) => ipcRenderer.invoke("sftp:list", s),
+  statRemoteTarget: (s) => ipcRenderer.invoke("sftp:stat-target", s),
   removeRemote: (s) => ipcRenderer.invoke("sftp:remove", s),
   shellDirectory: (id) => ipcRenderer.invoke("ssh:directory", id),
   localDragAvailable: () => ipcRenderer.invoke("local-drag:available"),

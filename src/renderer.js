@@ -10,10 +10,28 @@ import { fileIcon, trashIcon } from "./file-icons.js";
 import { installQuickPasswords } from "./quick-passwords.js";
 import { installTerminalEcho } from "./terminal-echo.mjs";
 import { resolveTerminalClipboardShortcut } from "./terminal-clipboard.mjs";
+import {
+  collectLogicalTerminalLine,
+  extractTerminalPathMatches,
+  resolveRemoteClickPath,
+} from "./terminal-file-links.mjs";
 import "./style.css";
 const $ = (s) => document.querySelector(s);
 const api = window.api;
 const isMacPlatform = /\bMac/i.test(navigator.platform || navigator.userAgent);
+let linkModifierHeld = false;
+let hoveredTerminalLink = null;
+const isLinkModifier = (event) =>
+  !!event && (isMacPlatform ? event.metaKey && !event.ctrlKey : event.ctrlKey && !event.metaKey) && !event.altKey;
+function syncHoveredLinkDecoration(held) {
+  linkModifierHeld = held;
+  if (!hoveredTerminalLink) return;
+  hoveredTerminalLink.decorations.underline = held;
+  hoveredTerminalLink.decorations.pointerCursor = held;
+}
+window.addEventListener("keydown", (event) => syncHoveredLinkDecoration(isLinkModifier(event)), true);
+window.addEventListener("keyup", (event) => syncHoveredLinkDecoration(isLinkModifier(event)), true);
+window.addEventListener("blur", () => syncHoveredLinkDecoration(false));
 let sessions = [],
   current = null,
   pendingDelete = null,
@@ -30,10 +48,10 @@ const remoteDragType = "application/x-jayxterm-sftp";
 let focusedGroup;
 let fileWorkspaceOpen = false;
 let fileWorkspaceVersion = 0;
-let fileOpen = "double";
+let fileOpen = "single";
 let localDragAvailable = false;
 let localDragWarmed = false;
-let theme = applyTheme("#394351");
+let theme = applyTheme("#181818");
 let fontPreferences = { ...terminalDefaults };
 let fontOptions = terminalFont(fontPreferences);
 let defaultEncoding = terminalDefaults.defaultEncoding;
@@ -175,6 +193,97 @@ const loadSessionHistory = passwordHistory(
 const loadConnectHistory = passwordHistory(
   $("#password-dialog"), $("#connect-password-history"), $("#connect-password"), $("#toggle-connect-password"),
 );
+async function openTerminalClickedPath(tab, rawPath) {
+  if (!tab || !tabs.has(tab.id) || tab.moving || tab.state !== "已连接") {
+    toast("请先连接 SSH");
+    return;
+  }
+  try {
+    let target = rawPath;
+    let resolveHome = false;
+    if (rawPath.startsWith("/")) {
+      target = resolveRemoteClickPath(rawPath);
+    } else if (rawPath === "~" || rawPath.startsWith("~/")) {
+      target = rawPath;
+      resolveHome = true;
+    } else {
+      const baseDirectory =
+        tab.shellDirectory ||
+        (await api.shellDirectory(tab.id).catch(() => null)) ||
+        (tab.path?.startsWith("/") ? tab.path : null);
+      if (baseDirectory) {
+        target = resolveRemoteClickPath(rawPath, { baseDirectory });
+      } else {
+        target = rawPath;
+        resolveHome = true;
+      }
+    }
+    const stat = await api.statRemoteTarget({ id: tab.id, path: target, resolveHome });
+    if (!stat?.exists) {
+      toast("未找到远端文件：" + (stat?.path || target));
+      return;
+    }
+    if (stat.directory) {
+      await loadFiles(tab, stat.path);
+      toast("已定位到目录：" + stat.path);
+      return;
+    }
+    await api.openRemoteEditor({ id: tab.id, path: stat.path });
+  } catch (error) {
+    toast("打开文件失败：" + error.message.replace(/^Error invoking remote method '[^']+': Error: /, ""));
+  }
+}
+function installTerminalFileLinks(term, tab) {
+  return term.registerLinkProvider({
+    provideLinks(bufferLineNumber, callback) {
+      const buffer = term.buffer.active;
+      const rowIndex = bufferLineNumber - 1;
+      const collected = collectLogicalTerminalLine(buffer, term.cols, rowIndex);
+      if (!collected || !collected.cells.length) return callback(undefined);
+      const { text, cells } = collected;
+      const links = [];
+      let cursor = 0;
+      for (const match of extractTerminalPathMatches(text)) {
+        while (cursor < cells.length && cells[cursor].end <= match.start) cursor++;
+        const first = cells[cursor];
+        if (!first || first.start >= match.end) continue;
+        let last = first;
+        for (let i = cursor; i < cells.length && cells[i].start < match.end; i++) {
+          last = cells[i];
+        }
+        if (bufferLineNumber < first.y1 || bufferLineNumber > last.y1) continue;
+        const link = {
+          range: {
+            start: { x: first.x1, y: first.y1 },
+            end: { x: last.x1 + last.width - 1, y: last.y1 },
+          },
+          text: match.path,
+          decorations: {
+            underline: linkModifierHeld,
+            pointerCursor: linkModifierHeld,
+          },
+          hover(event) {
+            hoveredTerminalLink = link;
+            const held = isLinkModifier(event) || linkModifierHeld;
+            link.decorations.underline = held;
+            link.decorations.pointerCursor = held;
+          },
+          leave() {
+            if (hoveredTerminalLink === link) hoveredTerminalLink = null;
+            link.decorations.underline = false;
+            link.decorations.pointerCursor = false;
+          },
+          activate(event, pathText) {
+            if (!isLinkModifier(event)) return;
+            openTerminalClickedPath(tab, pathText);
+          },
+        };
+        links.push(link);
+      }
+      callback(links.length ? links : undefined);
+    },
+  });
+}
 async function openRemoteEditor(t, file) {
   if (t.state !== "已连接" || t.moving) {
     toast("请先连接 SSH");
@@ -610,6 +719,7 @@ function createTerminal(session, id, { moving = false } = {}) {
   if (highlightKeywords) tab.highlights = installKeywordHighlights(term, theme);
   if (quickPasswordsEnabled) tab.passwordPrompt = quickPasswords.watch(tab);
   tab.echo = installTerminalEcho(tab, predictiveEcho);
+  tab.fileLinks = installTerminalFileLinks(term, tab);
   term.parser.registerOscHandler(7, (value) => {
     const match = /^file:\/\/([^/]*)(\/[^\x00-\x1f]*)$/.exec(value);
     if (!match) return true;
@@ -931,6 +1041,7 @@ function closeTab(id, disconnect = true) {
   terminalSearch.remove(t);
   t.highlights?.dispose();
   t.passwordPrompt?.dispose();
+  t.fileLinks?.dispose();
   t.echo.dispose();
   t.term.dispose();
   t.pane.remove();

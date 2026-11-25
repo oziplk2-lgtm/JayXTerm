@@ -295,7 +295,29 @@ process.on("message", async (m) => {
                 ? resolve({ exists: false })
                 : done(e, { exists: true, directory: attrs?.isDirectory() }),
             );
-          else reject(new Error("未知文件操作"));
+          else if (m.action === "stat-target") {
+            const checkPath = (target) =>
+              s.stat(target, (err, attrs) =>
+                err && err.code === 2
+                  ? resolve({ exists: false, path: target })
+                  : done(err, {
+                      exists: true,
+                      path: target,
+                      directory: attrs?.isDirectory(),
+                    }),
+              );
+            if (m.resolveHome) {
+              s.realpath(".", (err, home) => {
+                if (err) return reject(err);
+                const sub = m.path === "~"
+                  ? "."
+                  : m.path.startsWith("~/") ? m.path.slice(2) : m.path;
+                checkPath(path.posix.resolve(home, sub));
+              });
+            } else {
+              checkPath(m.path);
+            }
+          } else reject(new Error("未知文件操作"));
         });
       send({ type: "result", rid: m.rid, result });
     }

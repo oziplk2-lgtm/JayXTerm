@@ -1,4 +1,4 @@
-const defaultBackground = "#394351";
+const defaultBackground = "#181818";
 const rgb = (color) => color.slice(1).match(/../g).map((part) => parseInt(part, 16));
 const mix = (from, to, amount) => "#" + rgb(from).map((value, index) =>
   Math.round(value + (rgb(to)[index] - value) * amount).toString(16).padStart(2, "0")).join("");
@@ -18,23 +18,27 @@ export function createTheme(color = defaultBackground) {
   // Move secondary surfaces away from the foreground to retain readable contrast.
   const shade = dark ? "#000000" : "#ffffff";
   const readable = (preferred) => contrast(preferred, background) >= 4.5 ? preferred : strongest;
-  const ink = readable(dark ? "#edf2f8" : "#252b38");
+  const ink = readable(dark ? "#cccccc" : "#252b38");
   const muted = readable(mix(ink, background, 0.2));
   const chrome = mix(background, shade, 0.08);
   const surface = mix(background, shade, 0.16);
-  const accent = readable(dark ? "#b4cdf3" : "#214f8c");
+  const accent = readable(dark ? "#4daafc" : "#214f8c");
   const selection = mix(background, ink, 0.25);
+  const terminalSelection = dark && contrast("#264f78", background) >= 1.5 ? "#264f78" : selection;
   const success = readable(dark ? "#a0dac1" : "#176547");
   const warning = readable(dark ? "#ebce9c" : "#805207");
   const danger = readable(dark ? "#ffb7bf" : "#a51d32");
   const ansi = dark
-    ? ["#202733", "#ed9ba1", "#91cdb2", "#debf88", "#91b9e7", "#c5b0de", "#8fcad3", "#cfd9e6"]
+    ? ["#000000", "#cd3131", "#0dbc79", "#e5e510", "#2472c8", "#bc3fbc", "#11a8cd", "#e5e5e5"]
     : ["#202733", "#a51d32", "#176547", "#805207", "#214f8c", "#743a8e", "#17656e", "#555d68"];
+  const brightAnsi = dark
+    ? ["#666666", "#f14c4c", "#23d18b", "#f5f543", "#3b8eea", "#d670d6", "#29b8db", "#ffffff"]
+    : ansi.map((value) => mix(value, strongest, 0.15));
   const terminal = { background, foreground: ink, cursor: ink, cursorAccent: background,
-    selectionBackground: selection, selectionForeground: strongest, selectionInactiveBackground: selection };
+    selectionBackground: terminalSelection, selectionForeground: strongest, selectionInactiveBackground: terminalSelection };
   for (const [index, name] of ["black", "red", "green", "yellow", "blue", "magenta", "cyan", "white"].entries()) {
     terminal[name] = ansi[index];
-    terminal["bright" + name[0].toUpperCase() + name.slice(1)] = mix(ansi[index], strongest, 0.15);
+    terminal["bright" + name[0].toUpperCase() + name.slice(1)] = brightAnsi[index];
   }
   return {
     dark, background, chrome, surface, ink, muted, accent, selection, terminal,

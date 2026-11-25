@@ -261,7 +261,7 @@ async function check(window, source) {
     );
     assert.ok(target.dirs.has("/home/jay/projects/upload-tree/nested/empty"));
     assert.equal(target.files.get("/home/jay/projects/upload-tree/nested/remote:only.txt")?.toString(), "POSIX name");
-    await js(window, `document.querySelector('.terminal-group:last-child .workspace-files [data-directory="/home/jay/projects"]').dispatchEvent(new MouseEvent('dblclick',{bubbles:true}))`);
+    await js(window, `document.querySelector('.terminal-group:last-child .workspace-files [data-directory="/home/jay/projects"]').click()`);
     await waitFor(
       () => js(window, `document.querySelector('.terminal-group:last-child .workspace-files input').value === '/home/jay/projects'`),
       "Opening a directory did not update the target pane path",

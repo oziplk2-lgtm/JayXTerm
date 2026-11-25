@@ -3,6 +3,29 @@ const fs = require("node:fs");
 const path = require("node:path");
 const { BrowserWindow, dialog } = require("electron");
 
+async function winPointForTerminalText(w, target) {
+  return w.webContents.executeJavaScript(`(() => {
+    const pane = document.querySelector(".terminal-group.focused .terminal-pane.active") || document.querySelector(".terminal-pane.active");
+    const screen = pane.querySelector(".xterm-screen");
+    const rows = [...pane.querySelectorAll(".xterm-rows > div")];
+    const cols = Number(pane.dataset.cols) || 100;
+    const rect = screen.getBoundingClientRect();
+    const cellW = rect.width / cols;
+    const cellH = rect.height / rows.length;
+    for (let r = rows.length - 1; r >= 0; r--) {
+      const text = rows[r].textContent;
+      const idx = text.indexOf(${JSON.stringify(target)});
+      if (idx >= 0) {
+        return {
+          x: Math.round(rect.left + (idx + 3) * cellW),
+          y: Math.round(rect.top + (r + 0.5) * cellH),
+        };
+      }
+    }
+    throw new Error("Target text not found in terminal rows: " + ${JSON.stringify(target)});
+  })()`);
+}
+
 async function check(w) {
   const chosen = path.resolve(".codex-cache/qa/cache-location");
   const openDialog = dialog.showOpenDialog;
@@ -33,14 +56,14 @@ async function check(w) {
   try {
     await run(`
       const initial = await api.settings();
-      if (initial.saveHistory || initial.fileOpen !== "double" || initial.cachePath)
+      if (initial.saveHistory || initial.fileOpen !== "single" || initial.cachePath)
         throw new Error("Wrong default settings");
       const color = () => getComputedStyle($(".sidebar")).backgroundColor;
       const terminal = () => getComputedStyle($(".terminal-group-body")).backgroundColor;
-      if (!document.querySelector(".topbar #settings-open") || color() !== "rgb(57, 67, 81)")
+      if (!document.querySelector(".topbar #settings-open") || color() !== "rgb(24, 24, 24)")
         throw new Error("Missing title bar settings or default background");
       const terminalBackground = terminal();
-      if (terminalBackground !== "rgb(57, 67, 81)" ||
+      if (terminalBackground !== "rgb(24, 24, 24)" ||
           getComputedStyle($(".terminal-pane.active .xterm-viewport")).backgroundColor !== terminalBackground ||
           getComputedStyle($(".window-tools")).backdropFilter !== "none")
         throw new Error("Missing matte terminal or software-friendly toolbar");
@@ -51,7 +74,7 @@ async function check(w) {
       $("#window-tools-options").hidePopover();
       await open();
       const hexInput = $("#settings-background-value");
-      if (!$("#settings-pick-color") || hexInput.value !== "#394351")
+      if (!$("#settings-pick-color") || hexInput.value !== "#181818")
         throw new Error("Missing screen color picker button or hex input");
       hexInput.value = "#123456";
       hexInput.dispatchEvent(new Event("input"));
@@ -65,7 +88,7 @@ async function check(w) {
           getComputedStyle($(".terminal-pane.active .xterm-viewport")).backgroundColor !== terminal())
         throw new Error("Background preview did not update the terminal and workspace");
       $("#settings-cancel").click();
-      await wait(() => color() === "rgb(57, 67, 81)");
+      await wait(() => color() === "rgb(24, 24, 24)");
       if (terminal() !== terminalBackground) throw new Error("Cancel did not restore the terminal theme");
       const form = await open();
       $("#settings-choose-cache").click();
@@ -147,12 +170,12 @@ async function check(w) {
       $("#settings-default-cache").click();
       $("#settings-default-background").click();
       edit.elements.saveHistory.checked = false;
-      edit.elements.fileOpen.value = "double";
+      edit.elements.fileOpen.value = "single";
       edit.requestSubmit();
       await wait(() => !$("#settings-dialog").open);
       if ((await api.passwordHistory()).items.length || (await api.passwordHistory()).enabled)
         throw new Error("Password history was not cleared");
-      if ((await api.settings()).backgroundColor !== "#394351")
+      if ((await api.settings()).backgroundColor !== "#181818")
         throw new Error("Background reset was not saved");
       if (await api.reveal(saved.id) !== "132exampleio")
         throw new Error("Clearing history changed a saved session password");
@@ -202,6 +225,48 @@ async function check(w) {
       await wait(() => !$("#confirm-dialog").open);
       await wait(async () => !(await api.sessions()).some(s => s.id === copy.id));
     `);
+    // Verify Ctrl+Left-Click on a terminal file path opens the remote Monaco editor.
+    await run(`
+      const group = $(".terminal-group.focused") || $(".terminal-group");
+      const id = group?.querySelector(".tab.active")?.dataset.connection || window.__qaConnectionId;
+      const pane = group?.querySelector(".terminal-pane.active") || $(".terminal-pane.active");
+      pane.querySelector(".xterm-helper-textarea").focus();
+      window.api.send({ type: "input", id, data: "# /home/jay/README.md\\r\\n" });
+      await wait(() => pane.querySelector(".xterm-rows").textContent.includes("/home/jay/README.md"));
+    `);
+    const clickPoint = await winPointForTerminalText(w, "/home/jay/README.md");
+    w.webContents.debugger.attach("1.3");
+    try {
+      await w.webContents.debugger.sendCommand("Input.dispatchMouseEvent", {
+        type: "mouseMoved", x: clickPoint.x, y: clickPoint.y, modifiers: mod,
+      });
+      await new Promise(resolve => setTimeout(resolve, 60));
+      await w.webContents.debugger.sendCommand("Input.dispatchMouseEvent", {
+        type: "mousePressed", x: clickPoint.x, y: clickPoint.y, button: "left", clickCount: 1, modifiers: mod,
+      });
+      await w.webContents.debugger.sendCommand("Input.dispatchMouseEvent", {
+        type: "mouseReleased", x: clickPoint.x, y: clickPoint.y, button: "left", clickCount: 1, modifiers: mod,
+      });
+    } finally {
+      w.webContents.debugger.detach();
+    }
+    let terminalEditor;
+    for (let i = 0; i < 100; i++) {
+      terminalEditor = BrowserWindow.getAllWindows().find(win =>
+        win.getTitle().startsWith("README.md ·") && !win.webContents.isLoading());
+      if (terminalEditor) break;
+      await new Promise(resolve => setTimeout(resolve, 50));
+    }
+    assert.ok(terminalEditor, "Ctrl+Click on terminal file path did not open the editor");
+    await terminalEditor.webContents.executeJavaScript(`(async () => {
+      for (let i = 0; i < 100; i++) {
+        if (document.querySelector(".monaco-editor")) return;
+        await new Promise(resolve => setTimeout(resolve, 50));
+      }
+      throw new Error("Ctrl+Click editor did not load Monaco");
+    })()`);
+    terminalEditor.close();
+
     assert.ok(asked, "Migration confirmation did not open");
     const stored = fs.readFileSync(".codex-cache/qa/profile/settings.json", "utf8");
     assert.equal(stored.includes("132exampleio"), false);

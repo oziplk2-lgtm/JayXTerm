@@ -21,7 +21,7 @@ export function terminalFont(settings) {
   const family = validFontFamily(settings.fontFamily) ? settings.fontFamily.trim() : terminalDefaults.fontFamily;
   const cjk = validFontFamily(settings.cjkFontFamily) ? settings.cjkFontFamily.trim() : "";
   return {
-    fontFamily: `${cjk ? `"${cjkFontAlias(cjk)}", ` : ""}"${family}", Consolas, "Liberation Mono", monospace`,
+    fontFamily: `${cjk ? `"${cjkFontAlias(cjk)}", ` : ""}"${family}", Consolas, "Courier New", monospace`,
     fontSize: validFontSize(settings.fontSize) ? settings.fontSize : terminalDefaults.fontSize,
   };
 }

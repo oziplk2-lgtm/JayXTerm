@@ -28,7 +28,7 @@ async function check(w, fixture) {
     const $ = (selector) => document.querySelector(selector);
     const open = (name) => [...document.querySelectorAll("#file-list .file-row")]
       .find((row) => row.querySelector(".filename").textContent === name)
-      .dispatchEvent(new MouseEvent("dblclick", { bubbles: true }));
+      .click();
     const wait = async (predicate) => {
       for (let count = 0; count < 150; count++) {
         if (predicate()) return;
