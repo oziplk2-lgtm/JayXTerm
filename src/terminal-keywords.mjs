@@ -59,8 +59,19 @@ export function visibleKeywordSpans(buffer, cols, rows) {
   return spans;
 }
 
+function spanSignature(segments) {
+  if (!segments?.length) return "";
+  let out = "";
+  for (let i = 0; i < segments.length; i++) {
+    const s = segments[i];
+    if (i) out += ",";
+    out += s.x + ":" + s.width + ":" + s.kind;
+  }
+  return out;
+}
+
 export function installKeywordHighlights(term, theme) {
-  let frame, disposed = false;
+  let frame = null, throttleTimer = null, lastRefresh = 0, disposed = false;
   const rendered = new Map();
   const remove = entry => {
     entry.decorations.forEach(decoration => decoration.dispose());
@@ -73,12 +84,13 @@ export function installKeywordHighlights(term, theme) {
   function refresh() {
     frame = null;
     if (disposed) return;
+    lastRefresh = performance.now();
     const buffer = term.buffer.active;
     if (buffer.type !== "normal" || !term.element.checkVisibility({ visibilityProperty: true })) { clear(); return; }
     const colors = { ...theme.variables, info: theme.accent };
     const spans = visibleKeywordSpans(buffer, term.cols, term.rows);
     for (const [row, entry] of rendered) {
-      const signature = JSON.stringify(spans.get(row));
+      const signature = spanSignature(spans.get(row));
       if (entry.marker.isDisposed || entry.marker.line !== row || entry.signature !== signature) {
         remove(entry);
         rendered.delete(row);
@@ -98,21 +110,40 @@ export function installKeywordHighlights(term, theme) {
         });
         decorations.push(decoration);
       }
-      rendered.set(row, { marker, decorations, signature: JSON.stringify(segments) });
+      rendered.set(row, { marker, decorations, signature: spanSignature(segments) });
     }
   }
-  function schedule() {
-    if (!disposed && frame == null) frame = requestAnimationFrame(refresh);
+  function scheduleNow() {
+    if (disposed || frame != null) return;
+    if (throttleTimer != null) { clearTimeout(throttleTimer); throttleTimer = null; }
+    frame = requestAnimationFrame(refresh);
   }
-  const listeners = [term.onWriteParsed(schedule), term.onScroll(schedule), term.onResize(schedule),
-    term.buffer.onBufferChange(() => { clear(); schedule(); })];
-  schedule();
+  function scheduleOutput() {
+    if (disposed || frame != null || throttleTimer != null) return;
+    const elapsed = performance.now() - lastRefresh;
+    if (elapsed >= 60) {
+      frame = requestAnimationFrame(refresh);
+    } else {
+      throttleTimer = setTimeout(() => {
+        throttleTimer = null;
+        if (!disposed && frame == null) frame = requestAnimationFrame(refresh);
+      }, 100 - Math.min(elapsed, 60));
+    }
+  }
+  const listeners = [
+    term.onWriteParsed(scheduleOutput),
+    term.onScroll(scheduleNow),
+    term.onResize(scheduleNow),
+    term.buffer.onBufferChange(() => { clear(); scheduleNow(); }),
+  ];
+  scheduleNow();
   return {
-    refresh: schedule,
-    setTheme(value) { theme = value; clear(); schedule(); },
+    refresh: scheduleNow,
+    setTheme(value) { theme = value; clear(); scheduleNow(); },
     dispose() {
       disposed = true;
       cancelAnimationFrame(frame);
+      if (throttleTimer != null) clearTimeout(throttleTimer);
       listeners.forEach(listener => listener.dispose());
       clear();
     },

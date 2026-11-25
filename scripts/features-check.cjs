@@ -261,6 +261,41 @@ async function check(win, fixture) {
     assert.equal(splitAndSidebar.hiddenByBtn, true);
     assert.equal(splitAndSidebar.shownByKey, true);
 
+    // Verify P0-3 remote file operations (create file, mkdir, rename, hide dotfiles) and P0-4 Ctrl+Wheel zoom.
+    await run(`
+      $('#mode-files').click();
+      $('#remote-path').value = '/home/jay';
+      $('#path-form').requestSubmit();
+      await wait(() => [...document.querySelectorAll('#file-list .filename')].some(n => n.textContent === 'README.md'));
+      await api.mkdirRemote({ id: $('.tab.active').dataset.connection, path: '/home/jay/qa-dir' });
+      await api.createRemoteFile({ id: $('.tab.active').dataset.connection, path: '/home/jay/qa-note.txt' });
+      await api.renameRemote({ id: $('.tab.active').dataset.connection, from: '/home/jay/qa-note.txt', to: '/home/jay/.qa-hidden.txt' });
+      $('#refresh').click();
+      await wait(() => [...document.querySelectorAll('#file-list .filename')].some(n => n.textContent === '.qa-hidden.txt'));
+      $('#file-toggle-hidden').click();
+      await wait(() => ![...document.querySelectorAll('#file-list .filename')].some(n => n.textContent === '.qa-hidden.txt'));
+      $('#file-toggle-hidden').click();
+      await wait(() => [...document.querySelectorAll('#file-list .filename')].some(n => n.textContent === '.qa-hidden.txt'));
+    `);
+    assert.ok(fixture.dirs.has("/home/jay/qa-dir"), "mkdirRemote did not create directory");
+    assert.ok(fixture.files.has("/home/jay/.qa-hidden.txt"), "createRemoteFile/renameRemote did not persist renamed file");
+    fixture.dirs.delete("/home/jay/qa-dir");
+    fixture.files.delete("/home/jay/.qa-hidden.txt");
+
+    // Verify Ctrl+Wheel zoom and Ctrl+0 reset on terminal pane.
+    const wheelMod = process.platform === "darwin" ? { metaKey: true } : { ctrlKey: true };
+    const zoomResult = await run(`
+      const pane = $('.terminal-pane.active');
+      const beforeCols = Number(pane.dataset.cols);
+      pane.dispatchEvent(new WheelEvent('wheel', { deltaY: -120, ...${JSON.stringify(wheelMod)}, bubbles: true, cancelable: true }));
+      const zoomedToast = $('#toast').textContent;
+      pane.querySelector('.xterm-helper-textarea').dispatchEvent(new KeyboardEvent('keydown', { key: '0', code: 'Digit0', ...${JSON.stringify(wheelMod)}, bubbles: true, cancelable: true }));
+      const resetToast = $('#toast').textContent;
+      return { beforeCols, zoomedToast, resetToast };
+    `);
+    assert.match(zoomResult.zoomedToast, /终端字号：/);
+    assert.match(zoomResult.resetToast, /已恢复默认终端字号/);
+
     let hasRenameItem = false;
     Menu.buildFromTemplate = (items) => {
       const renameItem = items.find((item) => item.label === "重命名");

@@ -1304,6 +1304,20 @@ dialog pre {
 .history-delete:hover { color: var(--danger); }
 .command-history-footer { display: flex; align-items: center; gap: 14px; padding: 5px 10px; border-top: 1px solid var(--line); background: var(--surface); font-size: 11px; color: var(--muted); }
 .command-history-footer kbd { font-family: inherit; padding: 0 4px; border: 1px solid var(--line); border-radius: 3px; background: var(--chrome); color: var(--ink); font-size: 10px; }
+.terminal-reconnect-bar { position: absolute; z-index: 8; top: 8px; left: 50%; transform: translateX(-50%); display: flex; align-items: center; gap: 10px; max-width: calc(100% - 24px); padding: 6px 10px; border: 1px solid var(--line); border-radius: 6px; background: var(--chrome); color: var(--ink); box-shadow: 0 4px 16px #0006; font-size: 12px; }
+.terminal-reconnect-bar[hidden] { display: none; }
+.terminal-reconnect-msg { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--muted); }
+.terminal-reconnect-bar .reconnect-action { padding: 4px 10px; font-size: 12px; flex-shrink: 0; }
+.terminal-reconnect-bar .reconnect-dismiss { padding: 2px 6px; border: 0; background: transparent; color: var(--muted); flex-shrink: 0; }
+.terminal-reconnect-bar .reconnect-dismiss:hover { color: var(--ink); background: var(--hover); }
+.file-controls-row { display: flex; align-items: center; gap: 6px; padding: 0 12px 8px; }
+.file-controls-row select { flex: 1; min-width: 0; margin: 0; padding: 4px 6px; font-size: 11px; height: 26px; }
+.file-controls-row button { flex: none; padding: 4px 8px; font-size: 11px; height: 26px; white-space: nowrap; border-color: var(--page-line); }
+.file-controls-row button[aria-pressed="true"] { color: var(--accent); border-color: color-mix(in srgb, var(--accent) 55%, var(--page-line)); }
+.key-field-row { display: flex; align-items: center; gap: 6px; }
+.key-field-row input { flex: 1; min-width: 0; }
+.key-field-row button { flex: none; white-space: nowrap; padding: 8px 10px; }
+#file-entry-error:empty { display: none; }
 .vault-heading { display: flex; align-items: center; justify-content: space-between; gap: 8px; }
 .vault-heading strong { font-weight: 550; }
 .vault-heading button { font-size: 12px; padding: 6px 10px; }

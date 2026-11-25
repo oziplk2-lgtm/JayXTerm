@@ -25,7 +25,29 @@ test("session validation rejects invalid connection details", () => {
   });
   assert.equal(s.name, "dev");
   assert.equal(s.port, 22);
+  assert.equal(s.authType, "password");
+  assert.equal(s.privateKeyPath, "");
+  assert.equal(s.jumpSessionId, "");
   assert.equal(s.password, undefined);
+  assert.throws(() =>
+    validateSession({ name: "key-only", host: "127.0.0.1", username: "root", authType: "key", privateKeyPath: "" }),
+    /私钥文件/,
+  );
+  assert.throws(() =>
+    validateSession({ id: "same-id", host: "127.0.0.1", username: "root", jumpSessionId: "same-id" }),
+    /跳板机/,
+  );
+  const keySession = validateSession({
+    id: "target-1",
+    host: "10.0.0.2",
+    username: "ops",
+    authType: "key",
+    privateKeyPath: " /home/me/.ssh/id_ed25519 ",
+    jumpSessionId: "bastion-1",
+  });
+  assert.equal(keySession.authType, "key");
+  assert.equal(keySession.privateKeyPath, "/home/me/.ssh/id_ed25519");
+  assert.equal(keySession.jumpSessionId, "bastion-1");
 });
 test("empty session names use the validated host, port and username", () => {
   assert.equal(validateSession({

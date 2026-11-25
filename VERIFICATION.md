@@ -1,5 +1,15 @@
 # 初版验证记录
 
+## 2026-11-25（0.10.15）：性能与稳定性优化 + P0 四项核心功能
+
+- 性能与稳定性：`src/ssh-worker.cjs` 升级为零 Base64 UTF-8 直传（`StringDecoder("utf8")` + 8ms 自适应微批合并，首包 0ms 零额外延迟）；`src/terminal-keywords.mjs` 加入刷屏自适应节流与轻量签名比对；`src/main.cjs` 增加 `requestSingleInstanceLock({ version })` 版本冲突弹窗提示、`uncaughtException` 强制清理退出与可选 `hardwareAcceleration` 开关。
+- P0 功能落地：
+  - 一键断线重连：`src/renderer.js` 与 `src/style.css` 新增 `.terminal-reconnect-bar` 原地重连，复用现有标签、滚屏历史并自动恢复 `tab.shellDirectory`。
+  - SSH 私钥与跳板机：`src/store.cjs`、`src/session-duplicate.cjs`、`src/main.cjs`、`src/ssh-worker.cjs`、`index.html`、`src/renderer.js` 支持 `authType: "key"` 私钥文件选择/DPAPI 加密口令及多级 `jumpSessionId` 转发链（带循环检测与主机指纹校验）。
+  - 远程文件管理：`src/ssh-worker.cjs`、`src/main.cjs`、`src/file-browser-utils.mjs`、`index.html`、`src/renderer.js` 支持新建文件/文件夹、重命名、复制远程路径、右键菜单、按名称/大小/时间排序及隐藏点文件开关。
+  - 终端缩放与回滚：`src/renderer.js` 支持 `Ctrl+滚轮` 缩放与 `Ctrl+0` 复位；`src/terminal-settings.mjs` / `src/app-settings.cjs` / `src/settings-panel.js` 开放 `3000 / 10000 / 30000` 回滚行数配置。
+- 验证：63 项单元测试（含新增 `src/file-browser-utils.test.cjs`、扩展 `store.test.cjs` / `app-settings.test.cjs` / `ssh-worker.test.cjs` 与打包白名单校验 `package-files.test.cjs`）及完整 CI Smoke（27.4 秒，含新建目录/文件/重命名/隐藏文件切换与 `Ctrl+滚轮` 缩放实测）全部通过。
+
 ## 2026-11-25（0.10.14）：分屏 1px 分割线、可拖动/隐藏左侧栏与 VS Code 终端搜索
 
 - 分屏分割线：`src/style.css` 对多窗格 `#terminal-area:not([data-count="1"])` 采用 `padding: 0; gap: 1px; background: var(--line)`，左右分屏与上下分屏统一呈现清晰 1px 分割线。

@@ -3,7 +3,7 @@ import { installFontPicker } from "./font-picker.js";
 import { normalizeHexColor } from "./color-picker-utils.mjs";
 
 // Add sections in the markup and fields here; loading/saving and navigation stay shared.
-const fields = ["backgroundColor", "fontFamily", "cjkFontFamily", "fontSize", "defaultEncoding", "highlightKeywords", "terminalSearchEnabled", "commandHistoryEnabled", "quickPasswordsEnabled", "predictiveEcho", "fileOpen", "saveHistory"];
+const fields = ["backgroundColor", "fontFamily", "cjkFontFamily", "fontSize", "scrollback", "defaultEncoding", "highlightKeywords", "terminalSearchEnabled", "commandHistoryEnabled", "quickPasswordsEnabled", "predictiveEcho", "hardwareAcceleration", "fileOpen", "saveHistory"];
 export function installSettingsPanel({ api, previewColor, previewFont, previewKeywords, onSave, toast }) {
   const $ = (selector) => document.querySelector(selector);
   const dialog = $("#settings-dialog"), form = $("#settings-form");
@@ -35,7 +35,8 @@ export function installSettingsPanel({ api, previewColor, previewFont, previewKe
     return Object.fromEntries(fields.map((name) => {
       const field = form.elements[name];
       return [name, field.type === "checkbox" ? field.checked :
-        field.type === "number" ? field.valueAsNumber : field.value];
+        field.type === "number" ? field.valueAsNumber :
+        name === "scrollback" ? Number(field.value) : field.value];
     }));
   }
   function preview() {
@@ -146,12 +147,15 @@ export function installSettingsPanel({ api, previewColor, previewFont, previewKe
     button.disabled = true;
     $("#settings-error").textContent = "";
     try {
+      const previousHw = saved?.hardwareAcceleration;
       const result = await api.applySettings({ ...readFields(), cachePath: cacheChoice });
       if (!result) return;
       saved = result;
       onSave(result);
       dialog.close();
       if (result.pendingCache !== null) toast("缓存位置将在下次启动时切换");
+      else if (previousHw !== undefined && result.hardwareAcceleration !== previousHw)
+        toast("硬件加速渲染设置将在下次启动时生效");
     } catch (error) { $("#settings-error").textContent = error.message; }
     finally { button.disabled = false; }
   };

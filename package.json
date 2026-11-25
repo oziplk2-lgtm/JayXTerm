@@ -1,6 +1,6 @@
 {
   "name": "jayxterm",
-  "version": "0.10.14",
+  "version": "0.10.15",
   "description": "A focused SSH and SFTP desktop client",
   "private": true,
   "author": "JayXTerm contributors",

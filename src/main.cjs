@@ -27,9 +27,9 @@ const { openCommandHistory } = require("./command-history.cjs");
 const { openPasswordVault } = require("./password-vault.cjs");
 const { createTheme } = require("./theme.mjs");
 const { readImport, previewImport, applyImport, exportOpenSsh } = require("./session-exchange.cjs");
-// Deliberately use software rendering as the initial performance baseline.
+const fsSync = require("node:fs");
+const os = require("node:os");
 app.setName("JayXTerm");
-app.disableHardwareAcceleration();
 if (!app.isPackaged) {
   app.setPath(
     "userData",
@@ -50,6 +50,27 @@ if (!app.isPackaged) {
     ),
   );
 }
+// Keep software rendering as the default baseline unless user enables hardware acceleration.
+const hardwareAccelerationEnabled = (() => {
+  try {
+    const raw = fsSync.readFileSync(path.join(app.getPath("userData"), "settings.json"), "utf8");
+    return JSON.parse(raw)?.hardwareAcceleration === true;
+  } catch {
+    return false;
+  }
+})();
+if (!hardwareAccelerationEnabled) app.disableHardwareAcceleration();
+if (!process.env.JAYXTERM_QA) {
+  process.on("uncaughtException", (error) => {
+    try {
+      if (app.isReady()) {
+        dialog.showErrorBox("JayXTerm 启动异常", error?.stack || String(error));
+      }
+    } catch {}
+    worker?.kill();
+    app.exit(1);
+  });
+}
 let window, worker, store, workspace;
 const owners = new Map(),
   states = new Map(),
@@ -62,7 +83,7 @@ function ensureOwner(sender, id) {
   if (workspace.moves.has(id)) throw new Error("会话正在移动");
 }
 const hasInstanceLock =
-  process.env.JAYXTERM_QA || app.requestSingleInstanceLock();
+  process.env.JAYXTERM_QA || app.requestSingleInstanceLock({ version: app.getVersion() });
 if (!hasInstanceLock) app.quit();
 const defaultCache = app.getPath("sessionData");
 const appSettings = hasInstanceLock && openAppSettings(
@@ -211,7 +232,9 @@ app.whenReady().then(() => {
     if (m.type === "hostkey") {
       const config = active.get(m.id);
       if (!config) return send({ type: "verify", id: m.id, accept: false });
-      const host = JSON.stringify([config.host, config.port]);
+      const targetHost = m.host || config.host;
+      const targetPort = m.port || config.port;
+      const host = JSON.stringify([targetHost, targetPort]);
       const known = store.get().hosts[host];
       let accept = known === m.fingerprint;
       if (!accept) {
@@ -221,7 +244,7 @@ app.whenReady().then(() => {
           defaultId: 0,
           cancelId: 0,
           title: known ? "服务器指纹发生变化" : "首次连接此服务器",
-          message: `${config.host}:${config.port}`,
+          message: `${targetHost}:${targetPort}`,
           detail: `请通过可信渠道核对服务器指纹。\n\n${m.fingerprint}${known ? "\n\n原指纹：" + known : ""}`,
         });
         accept = response === 1;
@@ -600,20 +623,55 @@ ipcMain.handle("command-history:clear", (event, options) => {
   if (result.removed) broadcastCommandHistory();
   return result;
 });
+function resolveJumpChain(jumpSessionId, excludeId) {
+  if (!jumpSessionId) return [];
+  const all = store.get().sessions;
+  const visited = new Set(excludeId ? [excludeId] : []);
+  const hops = [];
+  let cursor = jumpSessionId;
+  while (cursor) {
+    if (visited.has(cursor)) throw new Error("跳板机配置存在循环引用");
+    visited.add(cursor);
+    const hop = all.find((item) => item.id === cursor);
+    if (!hop) throw new Error("找不到已配置的跳板机会话，请检查会话设置");
+    hops.unshift({
+      config: {
+        host: hop.host,
+        port: hop.port,
+        username: hop.username,
+        authType: hop.authType === "key" ? "key" : "password",
+        privateKeyPath: hop.authType === "key" ? hop.privateKeyPath || "" : "",
+      },
+      password: decryptSessionPassword(hop.password),
+    });
+    cursor = hop.jumpSessionId || "";
+  }
+  return hops;
+}
+ipcMain.handle("sessions:choose-key", async (event) => {
+  const sshDir = path.join(os.homedir(), ".ssh");
+  const result = await dialog.showOpenDialog(BrowserWindow.fromWebContents(event.sender), {
+    title: "选择 SSH 私钥文件",
+    defaultPath: fsSync.existsSync(sshDir) ? sshDir : os.homedir(),
+    properties: ["openFile", "showHiddenFiles"],
+  });
+  return result.canceled ? null : result.filePaths[0];
+});
 ipcMain.handle("ssh:test", (e, input) => {
   const config = validateSession({
     ...input,
     name: String(input.name || "").trim() || "测试连接",
   });
   const password = input.password || storedPassword(input.id);
+  const jumps = resolveJumpChain(config.jumpSessionId, config.id);
   const id = randomUUID();
   active.set(id, config);
   owners.set(id, e.sender.id);
-  if (input.password && appSettings.describe().saveHistory) pendingPasswords.set(id, input.password);
+  if (input.password && config.authType !== "key" && appSettings.describe().saveHistory) pendingPasswords.set(id, input.password);
   return new Promise((resolve, reject) => {
     const timer = setTimeout(() => finishTest(id, "测试连接超时"), 120000);
     tests.set(id, { resolve, reject, timer });
-    send({ type: "connect", id, config, password, test: true });
+    send({ type: "connect", id, config, password, jumps, test: true });
   });
 });
 ipcMain.handle("ssh:encoding", async (e, { id, encoding }) => {
@@ -673,15 +731,20 @@ ipcMain.handle("sessions:delete", (e, id) => {
   workspace.broadcast({ type: "sessions-changed" }, e.sender.id);
   return safeSessions();
 });
-ipcMain.handle("ssh:connect", (e, { sessionId, password, cols, rows }) => {
+ipcMain.handle("ssh:connect", (e, { sessionId, password, directory, cols, rows }) => {
   const s = store.get().sessions.find((s) => s.id === sessionId);
   if (!s) throw new Error("会话不存在");
+  const jumps = resolveJumpChain(s.jumpSessionId, s.id);
   const id = randomUUID();
   const secret = password || decryptSessionPassword(s.password);
+  const validDir =
+    typeof directory === "string" && directory.startsWith("/") && !/[\x00-\x1f\x7f]/.test(directory) && directory.length <= 16384
+      ? directory
+      : undefined;
   active.set(id, s);
   owners.set(id, e.sender.id);
   states.set(id, "connecting");
-  if (password && appSettings.describe().saveHistory) pendingPasswords.set(id, password);
+  if (password && s.authType !== "key" && appSettings.describe().saveHistory) pendingPasswords.set(id, password);
   send({
     type: "connect",
     id,
@@ -690,8 +753,12 @@ ipcMain.handle("ssh:connect", (e, { sessionId, password, cols, rows }) => {
       port: s.port,
       username: s.username,
       encoding: s.encoding || "utf-8",
+      authType: s.authType === "key" ? "key" : "password",
+      privateKeyPath: s.authType === "key" ? s.privateKeyPath || "" : "",
     },
     password: secret,
+    jumps,
+    directory: validDir,
     cols,
     rows,
   });
@@ -740,6 +807,53 @@ ipcMain.handle("sftp:stat-target", (e, { id, path: target, resolveHome }) => {
   if (typeof target !== "string" || !target || target.includes("\0") || target.length > 4096)
     throw new Error("无效的远端路径");
   return request({ id, action: "stat-target", path: target, resolveHome: !!resolveHome });
+});
+function validatePosixTarget(remote) {
+  if (typeof remote !== "string" || !remote.startsWith("/") || remote === "/" ||
+      remote.includes("\0") || remote.endsWith("/") || path.posix.normalize(remote) !== remote ||
+      remote.length > 4096)
+    throw new Error("无效的远端路径");
+}
+ipcMain.handle("sftp:mkdir", (e, { id, path: remote }) => {
+  ensureOwner(e.sender, id);
+  if (!editorConnectionReady(id)) throw new Error("请先连接 SSH");
+  validatePosixTarget(remote);
+  return request({ id, action: "mkdir", path: remote });
+});
+ipcMain.handle("sftp:create-file", (e, { id, path: remote }) => {
+  ensureOwner(e.sender, id);
+  if (!editorConnectionReady(id)) throw new Error("请先连接 SSH");
+  validatePosixTarget(remote);
+  return request({ id, action: "create-file", path: remote });
+});
+ipcMain.handle("sftp:rename", (e, { id, from, to }) => {
+  ensureOwner(e.sender, id);
+  if (!editorConnectionReady(id)) throw new Error("请先连接 SSH");
+  validatePosixTarget(from);
+  validatePosixTarget(to);
+  if (from === to) return { from, to };
+  return request({ id, action: "rename", from, to });
+});
+ipcMain.handle("sftp:file-menu", (e, { id, path: remote, name, directory, symlink }) => {
+  ensureOwner(e.sender, id);
+  const win = workspace.get(e.sender.id);
+  const ready = editorConnectionReady(id);
+  const emitAction = (action) => {
+    if (win && !win.isDestroyed())
+      win.webContents.send("window:event", { type: "file-menu-action", id, action, path: remote, name, directory, symlink });
+  };
+  Menu.buildFromTemplate([
+    { label: directory ? "进入目录" : symlink ? "下载文件" : "编辑文件", enabled: ready, click: () => emitAction("open") },
+    { type: "separator" },
+    { label: "新建文件…", enabled: ready, click: () => emitAction("new-file") },
+    { label: "新建文件夹…", enabled: ready, click: () => emitAction("new-folder") },
+    { type: "separator" },
+    { label: "重命名…", enabled: ready && Boolean(remote), click: () => emitAction("rename") },
+    { label: "复制远程路径", enabled: Boolean(remote), click: () => { clipboard.writeText(remote); emitAction("copied-path"); } },
+    { label: directory ? "下载整个目录" : "下载文件", enabled: ready && Boolean(remote), click: () => emitAction("download") },
+    { type: "separator" },
+    { label: "删除", enabled: ready && Boolean(remote), click: () => emitAction("delete") },
+  ]).popup({ window: win });
 });
 ipcMain.handle("sftp:remove", async (event, { id, path: remote }) => {
   ensureOwner(event.sender, id);
@@ -984,6 +1098,23 @@ ipcMain.handle(
 );
 app.on("window-all-closed", () => app.quit());
 app.on("will-quit", () => worker?.kill());
-app.on("second-instance", () => {
+app.on("second-instance", (_event, _argv, _cwd, additionalData) => {
+  const incomingVersion = additionalData?.version;
+  if (incomingVersion && incomingVersion !== app.getVersion()) {
+    const target = BrowserWindow.getFocusedWindow() || BrowserWindow.getAllWindows()[0];
+    if (target && !target.isDestroyed()) {
+      if (target.isMinimized()) target.restore();
+      target.show();
+      target.focus();
+      dialog.showMessageBox(target, {
+        type: "info",
+        title: "检测到其他版本正在启动",
+        message: `当前正在运行 JayXTerm v${app.getVersion()}`,
+        detail: `检测到你正在启动 v${incomingVersion}。请先关闭当前旧版本窗口，再重新打开新版程序，以避免配置目录冲突。`,
+        buttons: ["知道了"],
+      }).catch(() => {});
+    }
+    return;
+  }
   if (workspace) workspace.create();
 });

@@ -72,6 +72,16 @@
             </form>
             <div class="file-actions">
               <button id="refresh">↻ 刷新</button>
+              <button id="file-new" type="button" popovertarget="file-new-options">＋ 新建 ▾</button>
+              <div
+                id="file-new-options"
+                popover
+                class="action-popover"
+                aria-label="新建远端项目"
+              >
+                <button id="new-remote-file" type="button">新建文件…</button>
+                <button id="new-remote-folder" type="button">新建文件夹…</button>
+              </div>
               <button id="upload" popovertarget="upload-options">↑ 上传 ▾</button>
               <div
                 id="upload-options"
@@ -85,6 +95,15 @@
               <button id="sync-cwd" title="将远程文件面板切换到 SSH 当前目录">
                 ⇄ SSH 当前目录
               </button>
+            </div>
+            <div class="file-controls-row">
+              <select id="file-sort" aria-label="文件排序方式" title="排序方式">
+                <option value="name:asc">名称 ↑</option>
+                <option value="name:desc">名称 ↓</option>
+                <option value="size:desc">大小 ↓</option>
+                <option value="modified:desc">时间 ↓</option>
+              </select>
+              <button id="file-toggle-hidden" type="button" aria-pressed="true" title="显示或隐藏点号开头文件">显示隐藏文件</button>
             </div>
             <div id="file-list" class="file-list"></div>
             <div id="transfer-status" class="transfer-status">
@@ -226,6 +245,13 @@ ABC xyz 0123456789 │ 中文字体预览，。！？</pre>
               <label for="settings-default-encoding">新会话默认编码</label>
               <select id="settings-default-encoding" name="defaultEncoding"><option value="utf-8">UTF-8</option><option value="gbk">GBK / CP936</option><option value="gb2312">GB2312</option></select>
               <p class="form-note">仅影响新建会话。已有连接可在窗口底栏切换编码，也可在会话配置中更改。</p>
+              <label for="settings-scrollback">终端回滚行数</label>
+              <select id="settings-scrollback" name="scrollback">
+                <option value="3000">3,000 行（默认，节省内存）</option>
+                <option value="10000">10,000 行（均衡）</option>
+                <option value="30000">30,000 行（长日志排查）</option>
+              </select>
+              <p class="form-note">保存后立即作用于当前与新建终端；在终端按 Ctrl+滚轮 可临时缩放字号（Ctrl+0 复位）。</p>
               <label class="check"><input id="settings-highlight-keywords" name="highlightKeywords" type="checkbox" />高亮日志关键词</label>
               <p class="form-note keyword-legend"><span class="success">Success / Passed</span><span class="error">Fail / Error</span><span class="warning">Warning / Timeout</span><span class="keyword-info">Info / Debug</span></p>
               <p class="form-note">匹配不区分大小写，支持中文成功、失败、错误、警告和超时；保留原始输出。Vim 等全屏程序使用自身配色。</p>
@@ -237,6 +263,8 @@ ABC xyz 0123456789 │ 中文字体预览，。！？</pre>
               <p class="form-note">仅记录普通 Shell 命令，自动跳过密码提示、全屏程序、前导空格及含密钥的命令；按 Ctrl+Shift+H（macOS Cmd+Shift+H）快速检索复用。</p>
               <label class="check"><input id="settings-predictive-echo" name="predictiveEcho" type="checkbox" checked />预测输入回显</label>
               <p class="form-note">网络较慢时提前显示已确认回显的普通英文命令输入；密码、中文输入和全屏程序保持远端回显。</p>
+              <label class="check"><input id="settings-hardware-acceleration" name="hardwareAcceleration" type="checkbox" />启用 GPU 硬件加速渲染（重启后生效）</label>
+              <p class="form-note">默认关闭以确保老显卡与远程桌面兼容；高分屏或多分屏刷屏场景开启后可降低 CPU 占用并提升流畅度。</p>
             </section>
             <section id="settings-files" role="tabpanel" aria-labelledby="settings-tab-files" hidden>
               <h3>文件与存储</h3>
@@ -333,8 +361,33 @@ ABC xyz 0123456789 │ 中文字体预览，。！？</pre>
             >分组<input name="group" placeholder="例如：开发环境"
           /></label>
         </div>
+        <div class="form-row">
+          <label
+            >认证方式<select name="authType" id="session-auth-type">
+              <option value="password">密码</option>
+              <option value="key">SSH 私钥文件</option>
+            </select></label
+          ><label
+            >跳板机（可选）<select name="jumpSessionId" id="session-jump-select">
+              <option value="">直连（无跳板机）</option>
+            </select></label
+          >
+        </div>
+        <div id="session-key-fields" hidden>
+          <label
+            >私钥文件路径
+            <div class="key-field-row">
+              <input
+                name="privateKeyPath"
+                id="session-private-key"
+                placeholder="例如：C:\Users\...\id_ed25519"
+                autocomplete="off"
+              /><button type="button" id="choose-private-key">选择私钥…</button>
+            </div></label
+          >
+        </div>
         <label
-          >密码
+          ><span id="session-password-label">密码</span>
           <div class="password-field">
             <input
               name="password"
@@ -447,6 +500,18 @@ ABC xyz 0123456789 │ 中文字体预览，。！？</pre>
         <div class="dialog-actions">
           <button id="window-rename-cancel" type="button">取消</button
           ><button class="primary" type="submit">保存</button>
+        </div>
+      </form>
+    </dialog>
+    <dialog id="file-entry-dialog" aria-labelledby="file-entry-title">
+      <form id="file-entry-form">
+        <h2 id="file-entry-title">新建文件</h2>
+        <p id="file-entry-parent" class="form-note"></p>
+        <label>名称<input id="file-entry-input" name="name" maxlength="255" required autocomplete="off" /></label>
+        <p id="file-entry-error" class="error" role="alert"></p>
+        <div class="dialog-actions">
+          <button id="file-entry-cancel" type="button">取消</button
+          ><button id="file-entry-submit" class="primary" type="submit">确定</button>
         </div>
       </form>
     </dialog>

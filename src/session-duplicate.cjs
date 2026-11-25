@@ -27,6 +27,9 @@ function buildDuplicatedSession(source, existingSessions = [], newId) {
     username: source.username,
     group: source.group || "",
     encoding: source.encoding || "utf-8",
+    authType: source.authType === "key" ? "key" : "password",
+    privateKeyPath: source.authType === "key" ? source.privateKeyPath || "" : "",
+    jumpSessionId: source.jumpSessionId || "",
   };
   if (source.password) copy.password = source.password;
   return copy;

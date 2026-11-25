@@ -27,7 +27,7 @@ async function check(source, fixture) {
     await delay(500);
     return w.webContents.executeJavaScript(`(async()=>{
    const samples=[];let resolve,token,started,received='';
-   const unsubscribe=window.api.onEvent(m=>{if(m.type==='data'&&m.id===${JSON.stringify(id)}){received+=atob(m.data);if(resolve&&received.includes(token)){const done=resolve;resolve=null;done(performance.now()-started);}}});
+   const unsubscribe=window.api.onEvent(m=>{if(m.type==='data'&&m.id===${JSON.stringify(id)}){received+=typeof m.text==='string'?m.text:atob(m.data);if(resolve&&received.includes(token)){const done=resolve;resolve=null;done(performance.now()-started);}}});
    try{for(let i=0;i<120;i++){token='PERF_'+i+'_'+Math.random().toString(36).slice(2);received='';samples.push(await new Promise((r,j)=>{const timeout=setTimeout(()=>j(new Error('Echo timeout')),3000);resolve=n=>{clearTimeout(timeout);r(n);};started=performance.now();window.api.send({type:'input',id:${JSON.stringify(id)},data:': '+token+'\\r'});}));}}
    finally{unsubscribe();}samples.sort((a,b)=>a-b);return {p50:samples[60],p95:samples[114]};
  })()`);

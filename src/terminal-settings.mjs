@@ -1,18 +1,22 @@
+export const scrollbackOptions = [3000, 10000, 30000];
 export const terminalDefaults = {
   fontFamily: "Cascadia Mono",
   cjkFontFamily: "",
   fontSize: 14,
+  scrollback: 3000,
   defaultEncoding: "utf-8",
   highlightKeywords: true,
   terminalSearchEnabled: true,
   commandHistoryEnabled: true,
   quickPasswordsEnabled: false,
   predictiveEcho: true,
+  hardwareAcceleration: false,
 };
 export const terminalEncodings = ["utf-8", "gbk", "gb2312"];
 export const validFontFamily = (value) => typeof value === "string" && value.trim().length > 0 &&
   value.length <= 100 && !/[\x00-\x1f\x7f"'\\;,{}<>]/.test(value);
 export const validFontSize = (value) => Number.isInteger(value) && value >= 8 && value <= 48;
+export const validScrollback = (value) => scrollbackOptions.includes(Number(value));
 export const validCjkFontFamily = (value) => value === "" || validFontFamily(value);
 // Restrict the override to CJK glyphs so a Chinese font's Latin glyphs cannot
 // change terminal cell measurements or the selected Western font.

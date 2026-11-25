@@ -1,10 +1,102 @@
 const { Client } = require("ssh2");
 const { TerminalCodec } = require("./codec.cjs");
 const crypto = require("node:crypto");
+const fs = require("node:fs");
+const path = require("node:path");
+const { StringDecoder } = require("node:string_decoder");
 const { transferTree, relayTree, virtualDragManifest, previewRemoteRemoval, removeRemote } = require("./transfers.cjs");
 const { readRemoteText, saveRemoteText } = require("./remote-text.cjs");
 const connections = new Map();
 const send = (m) => process.connected && process.send(m);
+
+function flushOutput(c) {
+  if (!c) return;
+  if (c.batchTimer) {
+    clearTimeout(c.batchTimer);
+    c.batchTimer = null;
+  }
+  if (!c.batchChunks.length && !c.batchBytes) return;
+  const text = c.batchChunks.join("");
+  const bytes = c.batchBytes;
+  c.batchChunks = [];
+  c.batchBytes = 0;
+  c.lastFlushAt = Date.now();
+  send({ type: "data", id: c.id, text, bytes });
+}
+
+function enqueueOutput(c, decodedBuf, rawBytes) {
+  const text = c.utf8.write(decodedBuf);
+  if (text) c.batchChunks.push(text);
+  c.batchBytes += rawBytes;
+  if ((!c.batchTimer && Date.now() - c.lastFlushAt >= 12) || c.batchBytes >= 32768) {
+    flushOutput(c);
+  } else if (!c.batchTimer) {
+    c.batchTimer = setTimeout(() => flushOutput(c), 8);
+  }
+}
+
+function destroyJumpClients(c) {
+  if (!c?.jumpClients?.length) return;
+  for (const jc of c.jumpClients) {
+    try { jc.destroy(); } catch {}
+  }
+  c.jumpClients = [];
+}
+
+function buildConnectOptions(cfg, secret, hostVerifier) {
+  const opts = {
+    host: cfg.host,
+    port: cfg.port,
+    username: cfg.username,
+    readyTimeout: 120000,
+    keepaliveInterval: 15000,
+    hostVerifier,
+  };
+  if (cfg.authType === "key" && cfg.privateKeyPath) {
+    let stat;
+    try { stat = fs.statSync(cfg.privateKeyPath); }
+    catch { throw new Error("找不到私钥文件：" + cfg.privateKeyPath); }
+    if (!stat.isFile() || stat.size > 262144)
+      throw new Error("私钥文件无效或过大：" + cfg.privateKeyPath);
+    opts.privateKey = fs.readFileSync(cfg.privateKeyPath);
+    if (secret) opts.passphrase = secret;
+  } else {
+    opts.password = secret;
+  }
+  return opts;
+}
+
+function connectJumpHop(c, hop, nextHost, nextPort, upstreamSock) {
+  return new Promise((resolve, reject) => {
+    const jc = new Client();
+    c.jumpClients.push(jc);
+    let settled = false;
+    const fail = (err) => {
+      if (settled) return;
+      settled = true;
+      try { jc.destroy(); } catch {}
+      reject(err);
+    };
+    jc.on("error", (err) => fail(new Error(`跳板机 ${hop.config.host} 连接失败：${err.message}`)));
+    jc.on("close", () => fail(new Error(`跳板机 ${hop.config.host} 连接已关闭`)));
+    jc.on("ready", () => {
+      jc.setNoDelay(true);
+      jc.forwardOut("127.0.0.1", 0, nextHost, nextPort, (err, stream) => {
+        if (err) return fail(new Error(`跳板机转发失败：${err.message}`));
+        settled = true;
+        resolve(stream);
+      });
+    });
+    const opts = buildConnectOptions(hop.config, hop.password, (key, callback) => {
+      const fingerprint =
+        "SHA256:" + crypto.createHash("sha256").update(key).digest("base64").replace(/=+$/, "");
+      c.verify = callback;
+      send({ type: "hostkey", id: c.id, host: hop.config.host, port: hop.config.port, fingerprint });
+    });
+    if (upstreamSock) opts.sock = upstreamSock;
+    jc.connect(opts);
+  });
+}
 // OpenSSH forks both channel processes from its per-connection daemon. Only
 // read a directory if that daemon has exactly one interactive PTY child.
 const directoryMarker = Buffer.from("JAYXTERM_PTY_CWD\0");
@@ -95,17 +187,30 @@ process.on("message", async (m) => {
     if (m.type === "duplicate") {
       const source = connections.get(m.source);
       if (!source?.stream || source.stream.destroyed) throw new Error("原 SSH 连接已断开");
-      m = { ...m, type: "connect", config: { ...source.config, encoding: source.codec.encoding },
-        password: source.password };
+      m = {
+        ...m,
+        type: "connect",
+        config: { ...source.config, encoding: source.codec.encoding },
+        password: source.password,
+        jumps: source.jumps,
+      };
     }
     if (m.type === "connect") {
       if (c) return;
       c = {
+        id: m.id,
         client: new Client(),
+        jumpClients: [],
+        jumps: Array.isArray(m.jumps) ? m.jumps : [],
         config: { ...m.config },
         password: m.password,
         pending: 0,
         codec: new TerminalCodec(m.config.encoding),
+        utf8: new StringDecoder("utf8"),
+        batchChunks: [],
+        batchBytes: 0,
+        batchTimer: null,
+        lastFlushAt: 0,
         size: { cols: m.cols || 100, rows: m.rows || 30 },
       };
       connections.set(m.id, c);
@@ -113,6 +218,10 @@ process.on("message", async (m) => {
         send({ type: "error", id: m.id, message: e.message }),
       );
       c.client.on("close", () => {
+        const rest = c.utf8.end();
+        if (rest) c.batchChunks.push(rest);
+        flushOutput(c);
+        destroyJumpClients(c);
         connections.delete(m.id);
         send({ type: "closed", id: m.id });
       });
@@ -147,15 +256,15 @@ process.on("message", async (m) => {
           stream.setWindow(c.size.rows, c.size.cols, 0, 0);
           stream.on("data", (data) => {
             c.pending += data.length;
-            send({
-              type: "data",
-              id: m.id,
-              data: c.codec.decode(data).toString("base64"),
-              bytes: data.length,
-            });
+            enqueueOutput(c, c.codec.decode(data), data.length);
             if (c.pending > 262144) stream.pause();
           });
-          stream.on("close", () => c.client.end());
+          stream.on("close", () => {
+            const rest = c.utf8.end();
+            if (rest) c.batchChunks.push(rest);
+            flushOutput(c);
+            c.client.end();
+          });
           if (m.directory) {
             // ASCII shell input preserves UTF-8 filenames even in a GBK terminal.
             const octal = Array.from(Buffer.from(m.directory, "utf8"),
@@ -165,25 +274,34 @@ process.on("message", async (m) => {
           send({ type: "ready", id: m.id, directory: m.directory });
         });
       });
-      c.client.connect({
-        host: m.config.host,
-        port: m.config.port,
-        username: m.config.username,
-        password: m.password,
-        readyTimeout: 120000,
-        keepaliveInterval: 15000,
-        hostVerifier(key, callback) {
-          const fingerprint =
-            "SHA256:" +
-            crypto
-              .createHash("sha256")
-              .update(key)
-              .digest("base64")
-              .replace(/=+$/, "");
-          c.verify = callback;
-          send({ type: "hostkey", id: m.id, fingerprint });
-        },
+      let sock;
+      if (c.jumps.length) {
+        try {
+          for (let i = 0; i < c.jumps.length; i++) {
+            const hop = c.jumps[i];
+            const next = c.jumps[i + 1]?.config || c.config;
+            sock = await connectJumpHop(c, hop, next.host, next.port, sock);
+          }
+        } catch (err) {
+          destroyJumpClients(c);
+          connections.delete(m.id);
+          send({ type: "error", id: m.id, message: err.message });
+          return;
+        }
+      }
+      const connectOpts = buildConnectOptions(m.config, m.password, (key, callback) => {
+        const fingerprint =
+          "SHA256:" +
+          crypto
+            .createHash("sha256")
+            .update(key)
+            .digest("base64")
+            .replace(/=+$/, "");
+        c.verify = callback;
+        send({ type: "hostkey", id: m.id, host: m.config.host, port: m.config.port, fingerprint });
       });
+      if (sock) connectOpts.sock = sock;
+      c.client.connect(connectOpts);
     } else if (m.type === "verify") {
       c?.verify?.(m.accept);
       if (c) c.verify = null;
@@ -191,6 +309,7 @@ process.on("message", async (m) => {
       if (c?.stream) c.stream.write(c.codec.encode(m.data));
     } else if (m.type === "freeze") {
       if (!c?.stream) throw new Error("连接已断开");
+      flushOutput(c);
       c.frozen = true;
       c.stream.pause();
       send({ type: "result", rid: m.rid, result: true });
@@ -199,13 +318,14 @@ process.on("message", async (m) => {
       if (c.pending < 65536) c.stream?.resume();
     } else if (m.type === "encoding" && c) {
       const tail = c.codec.setEncoding(m.encoding);
-      if (tail.length)
-        send({
-          type: "data",
-          id: m.id,
-          data: tail.toString("base64"),
-          bytes: 0,
-        });
+      const rest = c.utf8.end();
+      if (rest) c.batchChunks.push(rest);
+      c.utf8 = new StringDecoder("utf8");
+      if (tail.length) {
+        const decoded = c.utf8.write(tail);
+        if (decoded) c.batchChunks.push(decoded);
+      }
+      flushOutput(c);
       send({
         type: "result",
         rid: m.rid,
@@ -226,7 +346,13 @@ process.on("message", async (m) => {
     } else if (m.type === "ack" && c) {
       c.pending = Math.max(0, c.pending - m.bytes);
       if (c.pending < 65536 && !c.frozen) c.stream?.resume();
-    } else if (m.type === "disconnect") c?.client.destroy();
+    } else if (m.type === "disconnect") {
+      if (c) {
+        if (c.batchTimer) clearTimeout(c.batchTimer);
+        destroyJumpClients(c);
+        c.client.destroy();
+      }
+    }
     else if (m.type === "shell-directory") {
       send({ type: "result", rid: m.rid, result: await shellDirectory(c) });
     } else if (m.type === "sftp") {
@@ -317,6 +443,27 @@ process.on("message", async (m) => {
             } else {
               checkPath(m.path);
             }
+          } else if (m.action === "mkdir") {
+            s.lstat(m.path, (statErr) => {
+              if (!statErr) return reject(new Error("同名文件或目录已存在"));
+              if (statErr.code !== 2) return reject(statErr);
+              s.mkdir(m.path, (err) => done(err, { path: m.path }));
+            });
+          } else if (m.action === "create-file") {
+            s.lstat(m.path, (statErr) => {
+              if (!statErr) return reject(new Error("同名文件或目录已存在"));
+              if (statErr.code !== 2) return reject(statErr);
+              s.open(m.path, "wx", (openErr, handle) => {
+                if (openErr) return reject(openErr);
+                s.close(handle, (closeErr) => done(closeErr, { path: m.path }));
+              });
+            });
+          } else if (m.action === "rename") {
+            s.lstat(m.to, (statErr) => {
+              if (!statErr) return reject(new Error("目标名称已存在"));
+              if (statErr.code !== 2) return reject(statErr);
+              s.rename(m.from, m.to, (err) => done(err, { from: m.from, to: m.to }));
+            });
           } else reject(new Error("未知文件操作"));
         });
       send({ type: "result", rid: m.rid, result });

@@ -20,6 +20,7 @@ import {
   isSidebarToggleShortcut,
   isTerminalSearchShortcut,
 } from "./workspace-layout.mjs";
+import { sortAndFilterFiles, validateRemoteEntryName } from "./file-browser-utils.mjs";
 import {
   collectLogicalTerminalLine,
   extractTerminalPathMatches,
@@ -65,6 +66,7 @@ let theme = applyTheme("#181818");
 let fontPreferences = { ...terminalDefaults };
 let fontOptions = terminalFont(fontPreferences);
 let defaultEncoding = terminalDefaults.defaultEncoding;
+let terminalScrollback = terminalDefaults.scrollback;
 let highlightKeywords = false;
 let quickPasswordsEnabled = false;
 let terminalSearchEnabled = terminalDefaults.terminalSearchEnabled;
@@ -184,7 +186,13 @@ function updateSettings(settings) {
     if (quickPasswordsEnabled) quickPasswords.activate();
   }
   predictiveEcho = settings.predictiveEcho;
-  for (const tab of tabs.values()) tab.echo.setEnabled(predictiveEcho);
+  terminalScrollback = settings.scrollback || terminalDefaults.scrollback;
+  for (const tab of tabs.values()) {
+    tab.echo.setEnabled(predictiveEcho);
+    if (tab.term.options.scrollback !== terminalScrollback) {
+      tab.term.options.scrollback = terminalScrollback;
+    }
+  }
   defaultEncoding = settings.defaultEncoding;
   if (fileOpen === settings.fileOpen) return;
   fileOpen = settings.fileOpen;
@@ -543,6 +551,34 @@ $("#session-panel").addEventListener("keydown", (e) => {
     }
   }
 });
+function syncSessionAuthFields() {
+  const form = $("#session-form");
+  const isKey = form.elements.authType.value === "key";
+  $("#session-key-fields").hidden = !isKey;
+  $("#session-password-label").textContent = isKey ? "私钥口令（无口令可留空）" : "密码";
+  const hasSaved = form.dataset.hasPassword === "1";
+  form.elements.password.placeholder = isKey
+    ? hasSaved ? "已保存口令 · 留空保留" : "若私钥未加密可留空"
+    : hasSaved ? "已保存 · 留空保留密码" : "输入连接密码";
+}
+function populateJumpSelect(currentSessionId, selectedJumpId) {
+  const select = $("#session-jump-select");
+  select.replaceChildren(new Option("直连（无跳板机）", ""));
+  for (const item of sessions) {
+    if (item.id === currentSessionId) continue;
+    select.append(new Option(`${item.name} (${item.username}@${item.host}:${item.port})`, item.id));
+  }
+  select.value = selectedJumpId || "";
+}
+$("#session-auth-type").onchange = syncSessionAuthFields;
+$("#choose-private-key").onclick = async () => {
+  try {
+    const picked = await api.choosePrivateKey();
+    if (picked) $("#session-private-key").value = picked;
+  } catch (err) {
+    toast(err.message);
+  }
+};
 function edit(s = {}) {
   const form = $("#session-form");
   form.reset();
@@ -554,10 +590,12 @@ function edit(s = {}) {
   for (const field of ["id", "name", "host", "port", "username", "group"])
     form.elements[field].value =
       s[field] ?? (field === "port" ? 22 : field === "username" ? "root" : "");
+  form.elements.authType.value = s.authType === "key" ? "key" : "password";
+  form.elements.privateKeyPath.value = s.privateKeyPath || "";
+  populateJumpSelect(s.id || "", s.jumpSessionId || "");
+  form.dataset.hasPassword = s.hasPassword ? "1" : "0";
   form.elements.remember.checked = s.id ? s.hasPassword : true;
-  form.elements.password.placeholder = s.hasPassword
-    ? "已保存 · 留空保留密码"
-    : "输入连接密码";
+  syncSessionAuthFields();
   $("#editor-title").textContent = s.id ? "编辑会话" : "新建会话";
   $("#form-error").textContent = "";
   $("#editor").showModal();
@@ -716,14 +754,17 @@ $("#password-cancel").onclick = () => {
   passwordResolve?.(null);
   passwordResolve = null;
 };
+async function promptSessionSecret(session, labelText) {
+  $("#password-host").textContent = labelText || `${session.username}@${session.host}`;
+  $("#connect-password").value = "";
+  $("#password-dialog").showModal();
+  loadConnectHistory();
+  return await new Promise((r) => (passwordResolve = r));
+}
 async function connect(session) {
   let password;
-  if (!session.hasPassword) {
-    $("#password-host").textContent = `${session.username}@${session.host}`;
-    $("#connect-password").value = "";
-    $("#password-dialog").showModal();
-    loadConnectHistory();
-    password = await new Promise((r) => (passwordResolve = r));
+  if (session.authType !== "key" && !session.hasPassword) {
+    password = await promptSessionSecret(session);
     if (password === null) return;
   }
   try {
@@ -736,6 +777,60 @@ async function connect(session) {
     createTerminal(session, id);
   } catch (e) {
     toast(e.message);
+  }
+}
+function hideReconnectBar(tab) {
+  if (tab?.reconnectBar) tab.reconnectBar.hidden = true;
+}
+function showReconnectBar(tab, reason) {
+  if (!tab?.reconnectBar) return;
+  tab.reconnectMsg.textContent = reason || "SSH 连接已断开";
+  tab.reconnectBtn.disabled = false;
+  tab.reconnectBar.hidden = false;
+}
+async function reconnectTab(tab) {
+  if (!tab || tab.moving || tab.reconnecting) return;
+  const saved = sessions.find((s) => s.id === tab.session.id);
+  if (!saved) {
+    toast("原会话已从列表中删除，无法重新连接");
+    return;
+  }
+  let password;
+  if (saved.authType !== "key" && !saved.hasPassword) {
+    password = await promptSessionSecret(saved);
+    if (password === null) return;
+  }
+  tab.reconnecting = true;
+  if (tab.reconnectBtn) tab.reconnectBtn.disabled = true;
+  try {
+    const oldId = tab.id;
+    const directory = tab.shellDirectory || (tab.path?.startsWith("/") ? tab.path : undefined);
+    const newId = await api.connect({
+      sessionId: saved.id,
+      password,
+      directory,
+      cols: tab.term.cols,
+      rows: tab.term.rows,
+    });
+    tabs.delete(oldId);
+    tab.id = newId;
+    tab.session = saved;
+    tab.state = "连接中";
+    tabs.set(newId, tab);
+    if (tab.group.shown === oldId) tab.group.shown = newId;
+    if (current === oldId) current = newId;
+    if (tab.header?.element) tab.header.element.dataset.connection = newId;
+    hideReconnectBar(tab);
+    tab.term.writeln("\r\n\x1b[32m正在重新连接 " + saved.host + "…\x1b[0m");
+    if (current === newId) {
+      $("#status").textContent = `${saved.username}@${saved.host} · 连接中`;
+    }
+    renderTabs();
+  } catch (error) {
+    toast("重连失败：" + error.message);
+    if (tab.reconnectBtn) tab.reconnectBtn.disabled = false;
+  } finally {
+    tab.reconnecting = false;
   }
 }
 async function duplicateTab(tab) {
@@ -786,14 +881,24 @@ async function terminalClipboard(t, action, { clearOnCopy = false } = {}) {
 }
 function createTerminal(session, id, { moving = false } = {}) {
   const pane = el("div", "terminal-pane");
+  const reconnectBar = el("div", "terminal-reconnect-bar");
+  reconnectBar.hidden = true;
+  const reconnectMsg = el("span", "terminal-reconnect-msg", "连接已断开");
+  const reconnectBtn = el("button", "primary reconnect-action", "↻ 重新连接");
+  reconnectBtn.type = "button";
+  const reconnectDismiss = el("button", "reconnect-dismiss", "×");
+  reconnectDismiss.type = "button";
+  reconnectDismiss.title = "关闭提示";
+  reconnectDismiss.setAttribute("aria-label", "关闭重连提示");
+  reconnectBar.append(reconnectMsg, reconnectBtn, reconnectDismiss);
   const viewport = el("div", "terminal-viewport");
-  pane.append(viewport);
+  pane.append(reconnectBar, viewport);
   const group = focusedGroup || addGroup();
   group.body.append(pane);
   const term = new Terminal({
     ...fontOptions,
     lineHeight: 1.15,
-    scrollback: 3000,
+    scrollback: terminalScrollback,
     cursorBlink: false,
     theme: theme.terminal,
     // xterm's search and keyword decorations use its buffer/marker API.
@@ -810,12 +915,18 @@ function createTerminal(session, id, { moving = false } = {}) {
     term,
     fit,
     pane,
+    reconnectBar,
+    reconnectMsg,
+    reconnectBtn,
+    zoomDelta: 0,
     state: "连接中",
     encoding: session.encoding || "utf-8",
     path: ".",
     files: [],
     loadVersion: 0,
   };
+  reconnectBtn.onclick = () => reconnectTab(tab);
+  reconnectDismiss.onclick = () => hideReconnectBar(tab);
   if (highlightKeywords) tab.highlights = installKeywordHighlights(term, theme);
   if (quickPasswordsEnabled) tab.passwordPrompt = quickPasswords.watch(tab);
   tab.echo = installTerminalEcho(tab, predictiveEcho);
@@ -844,9 +955,25 @@ function createTerminal(session, id, { moving = false } = {}) {
   });
   tabs.set(id, tab);
   pane.addEventListener("focusin", () => {
-    if (current !== id && !fileWorkspaceOpen && tab.group.shown === id)
-      activate(id, false);
+    if (current !== tab.id && !fileWorkspaceOpen && tab.group.shown === tab.id)
+      activate(tab.id, false);
   });
+  pane.addEventListener(
+    "wheel",
+    (event) => {
+      const mod = isMacPlatform ? event.metaKey && !event.ctrlKey : event.ctrlKey && !event.metaKey;
+      if (!mod || event.altKey || !event.deltaY) return;
+      event.preventDefault();
+      const base = fontOptions.fontSize || 14;
+      const step = event.deltaY < 0 ? 1 : -1;
+      const nextSize = Math.min(48, Math.max(8, base + tab.zoomDelta + step));
+      tab.zoomDelta = nextSize - base;
+      term.options.fontSize = nextSize;
+      fitTerminal(tab);
+      toast(`终端字号：${nextSize}px（${isMacPlatform ? "Cmd" : "Ctrl"}+0 恢复）`);
+    },
+    { passive: false },
+  );
   // Route terminal clipboard shortcuts via Electron IPC and block browser-native
   // copy/paste events on the hidden textarea to avoid duplicate paste into xterm.
   const blockBrowserClipboard = (event) => {
@@ -857,6 +984,23 @@ function createTerminal(session, id, { moving = false } = {}) {
   pane.addEventListener("paste", blockBrowserClipboard, true);
   term.attachCustomKeyEventHandler((event) => {
     const hasModal = Boolean(document.querySelector("dialog[open]"));
+    if (
+      !hasModal &&
+      event.type === "keydown" &&
+      (isMacPlatform ? event.metaKey && !event.ctrlKey : event.ctrlKey && !event.metaKey) &&
+      !event.altKey &&
+      !event.shiftKey &&
+      (event.code === "Digit0" || event.code === "Numpad0") &&
+      tab.zoomDelta !== 0
+    ) {
+      event.preventDefault();
+      event.stopPropagation();
+      tab.zoomDelta = 0;
+      term.options.fontSize = fontOptions.fontSize;
+      fitTerminal(tab);
+      toast(`已恢复默认终端字号（${fontOptions.fontSize}px）`);
+      return false;
+    }
     if (!hasModal && isSidebarToggleShortcut(event, { isMac: isMacPlatform })) {
       event.preventDefault();
       event.stopPropagation();
@@ -894,7 +1038,7 @@ function createTerminal(session, id, { moving = false } = {}) {
     event.preventDefault();
     api
       .clipboardMenu({
-        id,
+        id: tab.id,
         hasSelection: term.hasSelection(),
         canPaste: tab.state === "已连接" && !tab.moving,
       })
@@ -911,11 +1055,11 @@ function createTerminal(session, id, { moving = false } = {}) {
       for (const cmd of captured) recordTabCommand(tab, cmd);
     }
     tab.echo.input(data);
-    if (!tab.moving) api.send({ type: "input", id, data });
+    if (!tab.moving) api.send({ type: "input", id: tab.id, data });
   });
   term.onResize(
     ({ cols, rows }) =>
-      !tab.moving && api.send({ type: "resize", id, cols, rows }),
+      !tab.moving && api.send({ type: "resize", id: tab.id, cols, rows }),
   );
   if (!moving) {
     activate(id);
@@ -1281,14 +1425,17 @@ api.onEvent((m) => {
   const t = tabs.get(m.id);
   if (!t) return;
   if (m.type === "data") {
-    const bytes = Uint8Array.from(atob(m.data), (c) => c.charCodeAt(0));
-    const rendered = t.echo.output(bytes);
-    t.term.write(bytes, () => {
+    const payload = typeof m.text === "string"
+      ? m.text
+      : Uint8Array.from(atob(m.data), (c) => c.charCodeAt(0));
+    const rendered = t.echo.output(payload);
+    t.term.write(payload, () => {
       rendered();
       api.send({ type: "ack", id: m.id, bytes: m.bytes });
     });
   } else if (m.type === "ready") {
     t.state = "已连接";
+    hideReconnectBar(t);
     fitTerminal(t);
     loadFiles(t, m.directory || ".");
     if (fileWorkspaceOpen) syncWorkspaceDirectory(t);
@@ -1297,6 +1444,7 @@ api.onEvent((m) => {
     t.echo.reset();
     clearCwdQuery(t);
     t.state = m.type === "closed" ? "已断开" : "连接出错";
+    showReconnectBar(t, m.message ? `${t.state}：${m.message}` : "SSH 连接已断开");
     quickPasswords.activate();
     if (fileWorkspaceOpen) renderWorkspaceFiles(t.group);
     t.term.writeln("\r\n\x1b[31m" + (m.message || "连接已关闭") + "\x1b[0m");
@@ -1328,20 +1476,145 @@ function warmLocalDrag() {
   localDragWarmed = true;
   api.warmLocalDrag();
 }
+const FILE_VIEW_KEY = "jayxterm:file-view";
+let fileViewPrefs = (() => {
+  try {
+    const saved = JSON.parse(localStorage.getItem(FILE_VIEW_KEY) || "{}");
+    return {
+      showHidden: typeof saved.showHidden === "boolean" ? saved.showHidden : true,
+      sortBy: ["name", "size", "modified"].includes(saved.sortBy) ? saved.sortBy : "name",
+      sortDir: saved.sortDir === "desc" ? "desc" : "asc",
+    };
+  } catch {
+    return { showHidden: true, sortBy: "name", sortDir: "asc" };
+  }
+})();
+function saveFileViewPrefs() {
+  try {
+    localStorage.setItem(FILE_VIEW_KEY, JSON.stringify(fileViewPrefs));
+  } catch {}
+}
+function syncFileControls() {
+  const sortEl = $("#file-sort");
+  const hiddenBtn = $("#file-toggle-hidden");
+  if (sortEl) sortEl.value = `${fileViewPrefs.sortBy}:${fileViewPrefs.sortDir}`;
+  if (hiddenBtn) {
+    hiddenBtn.setAttribute("aria-pressed", String(fileViewPrefs.showHidden));
+    hiddenBtn.textContent = fileViewPrefs.showHidden ? "隐藏点文件" : "显示隐藏文件";
+  }
+}
+function rerenderAllFilePanels() {
+  const tab = tabs.get(current);
+  if (tab) renderSidebarFiles(tab);
+  if (fileWorkspaceOpen) {
+    for (const group of groups) renderWorkspaceFiles(group);
+  }
+}
+syncFileControls();
+$("#file-sort").onchange = (event) => {
+  const [sortBy, sortDir] = event.target.value.split(":");
+  fileViewPrefs = { ...fileViewPrefs, sortBy, sortDir };
+  saveFileViewPrefs();
+  rerenderAllFilePanels();
+};
+$("#file-toggle-hidden").onclick = () => {
+  fileViewPrefs = { ...fileViewPrefs, showHidden: !fileViewPrefs.showHidden };
+  saveFileViewPrefs();
+  syncFileControls();
+  rerenderAllFilePanels();
+};
+let pendingFileEntry = null;
+function openFileEntryDialog({ mode, tab, existingName = "", existingPath = "" }) {
+  if (!tab || tab.state !== "已连接" || tab.moving) {
+    toast("请先连接 SSH");
+    return;
+  }
+  pendingFileEntry = { mode, tab, existingName, existingPath };
+  $("#file-entry-title").textContent =
+    mode === "new-file" ? "新建远端文件" : mode === "new-folder" ? "新建远端文件夹" : "重命名";
+  $("#file-entry-parent").textContent =
+    mode === "rename" ? `原路径：${existingPath}` : `目标目录：${tab.path}`;
+  const input = $("#file-entry-input");
+  input.value = mode === "rename" ? existingName : "";
+  input.placeholder = mode === "new-folder" ? "例如：logs" : "例如：config.yaml";
+  $("#file-entry-error").textContent = "";
+  $("#file-entry-dialog").showModal();
+  input.focus();
+  input.select();
+}
+$("#file-entry-cancel").onclick = () => $("#file-entry-dialog").close();
+$("#file-entry-form").onsubmit = async (event) => {
+  event.preventDefault();
+  if (!pendingFileEntry) return;
+  const { mode, tab, existingName, existingPath } = pendingFileEntry;
+  const submitBtn = $("#file-entry-submit");
+  const errorEl = $("#file-entry-error");
+  errorEl.textContent = "";
+  let name;
+  try {
+    name = validateRemoteEntryName($("#file-entry-input").value);
+  } catch (err) {
+    errorEl.textContent = err.message;
+    return;
+  }
+  submitBtn.disabled = true;
+  try {
+    if (mode === "new-file") {
+      const target = remoteJoin(tab.path, name);
+      await api.createRemoteFile({ id: tab.id, path: target });
+      $("#file-entry-dialog").close();
+      await loadFiles(tab, tab.path);
+      toast("已新建文件：" + name);
+    } else if (mode === "new-folder") {
+      const target = remoteJoin(tab.path, name);
+      await api.mkdirRemote({ id: tab.id, path: target });
+      $("#file-entry-dialog").close();
+      await loadFiles(tab, tab.path);
+      toast("已新建文件夹：" + name);
+    } else if (mode === "rename") {
+      if (name === existingName) {
+        $("#file-entry-dialog").close();
+        return;
+      }
+      const parent = existingPath.slice(0, existingPath.lastIndexOf("/")) || "/";
+      const to = remoteJoin(parent, name);
+      await api.renameRemote({ id: tab.id, from: existingPath, to });
+      $("#file-entry-dialog").close();
+      await loadFiles(tab, tab.path);
+      toast("已重命名为：" + name);
+    }
+  } catch (err) {
+    errorEl.textContent = err.message.replace(/^Error invoking remote method '[^']+': Error: /, "");
+  } finally {
+    submitBtn.disabled = false;
+  }
+};
+$("#new-remote-file").onclick = () => {
+  $("#file-new-options").hidePopover();
+  openFileEntryDialog({ mode: "new-file", tab: tabs.get(current) });
+};
+$("#new-remote-folder").onclick = () => {
+  $("#file-new-options").hidePopover();
+  openFileEntryDialog({ mode: "new-folder", tab: tabs.get(current) });
+};
 function renderFiles(t, list) {
   highlightDropTarget(null);
   list.replaceChildren();
-  if (!t.files.length)
+  const visibleFiles = sortAndFilterFiles(t.files, fileViewPrefs);
+  if (!visibleFiles.length)
     list.append(
       el(
         "div",
         "empty",
         t.loading
           ? "正在读取目录…"
-          : t.fileError || "目录为空，可将本地文件或文件夹拖到这里上传。",
+          : t.fileError ||
+            (t.files.length
+              ? "当前目录仅含隐藏文件，可点击「显示隐藏文件」查看。"
+              : "目录为空，可将本地文件或文件夹拖到这里上传。"),
       ),
     );
-  for (const f of t.files) {
+  for (const f of visibleFiles) {
     const row = el(
       "div",
       "file-row" + (t.selected?.name === f.name ? " selected" : ""),
@@ -1449,6 +1722,22 @@ function renderFiles(t, list) {
         e.preventDefault();
         open();
       }
+    };
+    row.oncontextmenu = (event) => {
+      event.preventDefault();
+      event.stopPropagation();
+      t.selected = f;
+      list.querySelector(".file-row.selected")?.classList.remove("selected");
+      row.classList.add("selected");
+      api
+        .fileContextMenu({
+          id: t.id,
+          path: remoteJoin(t.path, f.name),
+          name: f.name,
+          directory: f.directory,
+          symlink: f.symlink,
+        })
+        .catch((error) => toast(error.message));
     };
     list.append(row);
   }
@@ -1903,6 +2192,26 @@ api.onWindow(async (m) => {
   }
   if (m.type === "clipboard") {
     await terminalClipboard(tabs.get(m.id), m.action);
+    return;
+  }
+  if (m.type === "file-menu-action") {
+    const tab = tabs.get(m.id);
+    if (!tab) return;
+    if (m.action === "open") {
+      if (m.directory) loadFiles(tab, m.path);
+      else if (m.symlink) transfer(tab, "download", m.path);
+      else openRemoteEditor(tab, { name: m.name });
+    } else if (m.action === "new-file" || m.action === "new-folder") {
+      openFileEntryDialog({ mode: m.action, tab });
+    } else if (m.action === "rename") {
+      openFileEntryDialog({ mode: "rename", tab, existingName: m.name, existingPath: m.path });
+    } else if (m.action === "copied-path") {
+      toast("已复制远程路径：" + m.path);
+    } else if (m.action === "download") {
+      transfer(tab, "download", m.path, m.directory);
+    } else if (m.action === "delete") {
+      deleteRemote(tab, m.path);
+    }
     return;
   }
   if (m.type === "sessions-changed") {

@@ -2,7 +2,7 @@ const fs = require("node:fs");
 const path = require("node:path");
 const { createHmac, randomBytes, randomUUID } = require("node:crypto");
 const { openStore } = require("./store.cjs");
-const { terminalDefaults, terminalEncodings, validFontFamily, validCjkFontFamily, validFontSize } = require("./terminal-settings.mjs");
+const { terminalDefaults, terminalEncodings, validFontFamily, validCjkFontFamily, validFontSize, validScrollback } = require("./terminal-settings.mjs");
 
 const cacheFolders = ["Cache", "Code Cache", "GPUCache", "DawnGraphiteCache", "DawnWebGPUCache", "ShaderCache"];
 const defaultBackground = "#181818";
@@ -110,7 +110,7 @@ function mask(secret) {
   return chars.slice(0, 2).join("") + "*".repeat(Math.min(chars.length - 4, 12)) + chars.slice(-2).join("");
 }
 
-const terminalToggles = ["highlightKeywords", "terminalSearchEnabled", "commandHistoryEnabled", "quickPasswordsEnabled", "predictiveEcho"];
+const terminalToggles = ["highlightKeywords", "terminalSearchEnabled", "commandHistoryEnabled", "quickPasswordsEnabled", "predictiveEcho", "hardwareAcceleration"];
 
 function openAppSettings(file, defaultCache, safeStorage) {
   const store = openStore(file, defaults);
@@ -124,6 +124,8 @@ function openAppSettings(file, defaultCache, safeStorage) {
     if (!validFontFamily(data.fontFamily)) data.fontFamily = terminalDefaults.fontFamily;
     if (!validCjkFontFamily(data.cjkFontFamily)) data.cjkFontFamily = terminalDefaults.cjkFontFamily;
     if (!validFontSize(data.fontSize)) data.fontSize = terminalDefaults.fontSize;
+    if (!validScrollback(data.scrollback)) data.scrollback = terminalDefaults.scrollback;
+    else data.scrollback = Number(data.scrollback);
     if (!terminalEncodings.includes(data.defaultEncoding)) data.defaultEncoding = terminalDefaults.defaultEncoding;
     for (const name of terminalToggles)
       if (typeof data[name] !== "boolean") data[name] = terminalDefaults[name];
@@ -188,20 +190,21 @@ function openAppSettings(file, defaultCache, safeStorage) {
     },
     describe() {
       const { cachePath, pendingCache, cacheError, saveHistory, fileOpen, workspaceBackground,
-        fontFamily, cjkFontFamily, fontSize, defaultEncoding, highlightKeywords, terminalSearchEnabled, commandHistoryEnabled, quickPasswordsEnabled,
-        predictiveEcho } = settings();
+        fontFamily, cjkFontFamily, fontSize, scrollback, defaultEncoding, highlightKeywords, terminalSearchEnabled, commandHistoryEnabled, quickPasswordsEnabled,
+        predictiveEcho, hardwareAcceleration } = settings();
       return {
         cachePath, pendingCache: pendingCache?.path ?? null, cacheError, saveHistory, fileOpen, defaultCache,
         backgroundColor: validBackground(workspaceBackground) ? workspaceBackground : defaultBackground,
         defaultBackground,
-        fontFamily, cjkFontFamily, fontSize, defaultEncoding, highlightKeywords, terminalSearchEnabled, commandHistoryEnabled, quickPasswordsEnabled,
-        predictiveEcho,
+        fontFamily, cjkFontFamily, fontSize, scrollback, defaultEncoding, highlightKeywords, terminalSearchEnabled, commandHistoryEnabled, quickPasswordsEnabled,
+        predictiveEcho, hardwareAcceleration,
       };
     },
-    apply({ cachePath, migrate, saveHistory, fileOpen, backgroundColor, fontFamily, cjkFontFamily, fontSize, defaultEncoding, ...toggles }) {
+    apply({ cachePath, migrate, saveHistory, fileOpen, backgroundColor, fontFamily, cjkFontFamily, fontSize, scrollback, defaultEncoding, ...toggles }) {
       if ((fontFamily !== undefined && !validFontFamily(fontFamily)) ||
           (cjkFontFamily !== undefined && !validCjkFontFamily(cjkFontFamily)) ||
           (fontSize !== undefined && !validFontSize(fontSize)) ||
+          (scrollback !== undefined && !validScrollback(scrollback)) ||
           (defaultEncoding !== undefined && !terminalEncodings.includes(defaultEncoding)))
         throw new Error("无效的终端设置：字号范围为 8–48，编码为 UTF-8、GBK 或 GB2312");
       const data = settings();
@@ -225,6 +228,7 @@ function openAppSettings(file, defaultCache, safeStorage) {
       if (fontFamily !== undefined) data.fontFamily = fontFamily.trim();
       if (cjkFontFamily !== undefined) data.cjkFontFamily = cjkFontFamily.trim();
       if (fontSize !== undefined) data.fontSize = fontSize;
+      if (scrollback !== undefined) data.scrollback = Number(scrollback);
       if (defaultEncoding !== undefined) data.defaultEncoding = defaultEncoding;
       if (validBackground(backgroundColor))
         data.workspaceBackground = backgroundColor.toLowerCase() === defaultBackground ? null : backgroundColor;

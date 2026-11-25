@@ -248,9 +248,10 @@ test(
         { cols: 81, rows: 26 },
         "connected PTY must follow window changes",
       );
+      const dataText = (m) => typeof m.text === "string" ? m.text : Buffer.from(m.data, "base64").toString();
       send({ type: "input", id: "one", data: "中文 echo\r" });
       const echo = await wait((m) => m.id === "one" && m.type === "data");
-      assert.equal(Buffer.from(echo.data, "base64").toString(), "中文 echo\r");
+      assert.equal(dataText(echo), "中文 echo\r");
       send({
         type: "encoding",
         id: "one",
@@ -261,7 +262,7 @@ test(
       send({ type: "input", id: "one", data: "中文 GBK 回显\r" });
       const gbkEcho = await wait((m) => m.id === "one" && m.type === "data");
       assert.equal(
-        Buffer.from(gbkEcho.data, "base64").toString(),
+        dataText(gbkEcho),
         "中文 GBK 回显\r",
       );
       send({
@@ -281,7 +282,7 @@ test(
           (m) =>
             m.id === "one" &&
             m.type === "data" &&
-            Buffer.from(m.data, "base64").toString().includes("FROZEN_OUTPUT"),
+            dataText(m).includes("FROZEN_OUTPUT"),
         ),
         false,
         "ACK must not resume output during a handoff",
@@ -289,7 +290,7 @@ test(
       send({ type: "thaw", id: "one" });
       const thawed = await wait((m) => m.id === "one" && m.type === "data");
       assert.equal(
-        Buffer.from(thawed.data, "base64").toString(),
+        dataText(thawed),
         "FROZEN_OUTPUT",
       );
       const burst = "x".repeat(600000);
