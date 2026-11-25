@@ -1,5 +1,12 @@
 # 初版验证记录
 
+## 2026-11-25（0.10.14）：分屏 1px 分割线、可拖动/隐藏左侧栏与 VS Code 终端搜索
+
+- 分屏分割线：`src/style.css` 对多窗格 `#terminal-area:not([data-count="1"])` 采用 `padding: 0; gap: 1px; background: var(--line)`，左右分屏与上下分屏统一呈现清晰 1px 分割线。
+- 可拖动/隐藏侧栏：`index.html`、`src/style.css`、`src/workspace-layout.mjs`、`src/renderer.js` 新增 `#sidebar-resizer` 拖动手柄（`180–480px`、拖窄吸附隐藏、双击复位）及顶栏 `#sidebar-toggle` 按钮与 `Ctrl+B` / `Cmd+B` 快捷键，持久化到 `localStorage`。
+- VS Code 终端搜索：`src/terminal-search.js`、`src/workspace-layout.mjs`、`index.html`、`src/style.css` 升级为右上角停靠 Find Widget，补全 `Ctrl+F`、`ab` 全字匹配（绕过 `@xterm/addon-search` 非正则同行截断缺陷）、`.*` 正则与非法正则错误条、`Alt+C/W/R`、`F3`/`Shift+F3`、`Alt+↑/↓` 检索历史、无结果红字与 VS Code 暖橙高亮。
+- 验证：61 项单元测试（含新增 `src/workspace-layout.test.cjs`）与完整 CI Smoke（26.7 秒）全部通过；`scripts/features-check.cjs` 校验 1px 分屏分割线、侧栏拖动调宽/双击复位/按钮与快捷键切换，`scripts/terminal-assistance-check.cjs` 校验 `Ctrl+F`、`Aa`、`ab`、`.*`、非法正则与无结果状态并核对渲染截图。
+
 ## 2026-11-25（0.10.13）：修复打包清单遗漏 `src/command-history.cjs` 并新增打包依赖校验
 
 - 根因：`package.json` `build.files` 采用显式白名单，新增的 `src/command-history.cjs` 未加入列表，导致 electron-builder 打包后的便携版 `.exe` 启动时主进程抛出 `Cannot find module './command-history.cjs'`。

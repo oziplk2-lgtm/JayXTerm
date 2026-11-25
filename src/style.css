@@ -84,13 +84,79 @@ button.primary:hover {
   min-height: 0;
 }
 .sidebar {
-  width: clamp(214px, 22vw, 278px);
+  width: var(--sidebar-width, clamp(214px, 22vw, 278px));
   background: var(--page-bg);
   color: var(--page-ink);
-  border-right: 1px solid color-mix(in srgb, var(--page-ink) 10%, var(--page-bg));
   display: flex;
   flex-direction: column;
   flex-shrink: 0;
+}
+.sidebar-resizer {
+  position: relative;
+  width: 1px;
+  flex-shrink: 0;
+  background: color-mix(in srgb, var(--page-ink) 12%, var(--page-bg));
+  cursor: col-resize;
+  touch-action: none;
+  z-index: 5;
+}
+.sidebar-resizer::after {
+  content: "";
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  left: -3px;
+  right: -3px;
+}
+.sidebar-resizer:hover,
+.sidebar-resizer.dragging {
+  background: var(--accent);
+}
+.sidebar-resizer:hover::before,
+.sidebar-resizer.dragging::before {
+  content: "";
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  left: -1px;
+  width: 3px;
+  background: var(--accent);
+}
+.app-content.sidebar-hidden .sidebar,
+.app-content.sidebar-hidden .sidebar-resizer {
+  display: none;
+}
+body.resizing-sidebar {
+  cursor: col-resize;
+  user-select: none;
+}
+.sidebar-toggle-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 28px;
+  height: 28px;
+  padding: 0;
+  margin-left: 6px;
+  border: 0;
+  border-radius: 6px;
+  background: transparent;
+  color: var(--muted);
+}
+.sidebar-toggle-btn:hover {
+  background: var(--hover);
+  color: var(--ink);
+}
+.sidebar-toggle-btn[aria-pressed="true"] {
+  color: var(--ink);
+}
+.sidebar-toggle-btn svg {
+  width: 16px;
+  height: 16px;
+  fill: none;
+  stroke: currentColor;
+  stroke-width: 1.6;
+  stroke-linejoin: round;
 }
 .brand {
   display: flex;
@@ -992,6 +1058,15 @@ dialog pre {
 #terminal-area[data-count="3"] .terminal-group:last-child {
   grid-column: 1 / -1;
 }
+#terminal-area:not([data-count="1"]) {
+  padding: 0;
+  gap: 1px;
+  background: var(--line);
+}
+#terminal-area:not([data-count="1"]) .terminal-group {
+  border-radius: 0;
+  background: var(--terminal-bg);
+}
 .terminal-group {
   display: flex;
   flex-direction: column;
@@ -1171,10 +1246,12 @@ dialog pre {
 .statusbar button[aria-expanded="true"] { color: var(--ink); background: var(--hover); }
 .statusbar svg { width: 13px; height: 13px; fill: none; stroke: currentColor; stroke-width: 1.6; }
 .app-content main { position: relative; }
-.terminal-search { position: absolute; z-index: 10; bottom: 8px; right: 14px; display: flex; align-items: center; gap: 4px; padding: 4px 6px; max-width: calc(100% - 28px); border: 1px solid var(--line); border-radius: 4px; background: var(--chrome); box-shadow: 0 2px 10px #0006; }
+.terminal-search { position: absolute; z-index: 15; top: 40px; right: 14px; display: flex; flex-direction: column; align-items: stretch; gap: 4px; padding: 4px 6px; max-width: calc(100% - 28px); border: 1px solid var(--line); border-radius: 4px; background: var(--chrome); box-shadow: 0 4px 16px #0007; }
 .terminal-search[hidden] { display: none; }
+.terminal-search-row { display: flex; align-items: center; gap: 4px; }
 .terminal-search-field { display: flex; align-items: center; gap: 2px; padding: 1px 2px 1px 7px; border: 1px solid var(--line); border-radius: 3px; background: var(--terminal-bg); transition: border-color 0.12s; }
 .terminal-search-field:focus-within { border-color: var(--accent); }
+.terminal-search-field[data-invalid="true"] { border-color: var(--danger); }
 .terminal-search input { width: 196px; min-width: 96px; height: 22px; padding: 0 4px 0 0; border: 0; border-radius: 0; background: transparent; color: var(--ink); font-size: 12px; }
 .terminal-search input:focus-visible { outline: none; }
 .terminal-search input::-webkit-search-cancel-button { -webkit-appearance: none; appearance: none; }
@@ -1185,7 +1262,10 @@ dialog pre {
 .terminal-search button:disabled { opacity: 0.36; cursor: default; }
 .terminal-search button[aria-pressed="true"] { border-color: var(--accent); background: color-mix(in srgb, var(--accent) 22%, transparent); color: var(--ink); }
 .terminal-search button svg { width: 14px; height: 14px; fill: none; stroke: currentColor; stroke-width: 1.5; stroke-linecap: round; stroke-linejoin: round; }
-.terminal-search output { color: var(--muted); font-size: 11px; font-variant-numeric: tabular-nums; min-width: 44px; padding: 0 3px; text-align: center; white-space: nowrap; }
+.terminal-search output { color: var(--muted); font-size: 11px; font-variant-numeric: tabular-nums; min-width: 48px; padding: 0 3px; text-align: center; white-space: nowrap; }
+.terminal-search output[data-empty="true"] { color: var(--danger); }
+.terminal-search-error { font-size: 11px; color: var(--danger); padding: 3px 6px; border-radius: 3px; background: color-mix(in srgb, var(--danger) 14%, var(--terminal-bg)); border: 1px solid color-mix(in srgb, var(--danger) 55%, transparent); }
+.terminal-search-error[hidden] { display: none; }
 .settings-inline-row { display: flex; align-items: center; justify-content: space-between; gap: 12px; }
 .settings-inline-row button { flex: none; padding: 4px 10px; font-size: 12px; }
 .command-history-palette { position: absolute; z-index: 25; top: 14px; left: 50%; transform: translateX(-50%); width: min(640px, calc(100% - 28px)); max-height: min(460px, calc(100% - 40px)); display: flex; flex-direction: column; border: 1px solid var(--line); border-radius: 6px; background: var(--chrome); color: var(--ink); box-shadow: 0 10px 34px #0008; overflow: hidden; }

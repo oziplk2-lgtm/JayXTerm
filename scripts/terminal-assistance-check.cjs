@@ -71,12 +71,17 @@ async function check(win, fixture) {
     console.log("Checking scrollback search, Chinese soft wraps, navigation and per-tab scope");
     const columns = await run("return Number($('.terminal-pane.active').dataset.cols);");
     stream.write("needle-中文 first\r\nneedle-中文 second\r\nNEEDLE-中文 third\r\n");
+    stream.write("install ll wordcheck\r\n");
     stream.write(" ".repeat(columns - 4) + "跨行匹配needle-中文\r\n");
     stream.write(Array.from({ length: 70 }, (_, i) => `history row ${i}\r\n`).join(""));
+    const searchShortcut = process.platform === "darwin"
+      ? { key: "f", code: "KeyF", metaKey: true }
+      : { key: "f", code: "KeyF", ctrlKey: true };
     await run(`await wait(() => $('.terminal-pane.active .xterm-rows').textContent.includes('history row 69'));
       const searchBounds = $('#terminal-search-toggle').getBoundingClientRect();
       if (searchBounds.right > $('#terminal-encoding').getBoundingClientRect().left) throw new Error('Search must be left of encoding');
-      $('#terminal-search-toggle').click();
+      document.dispatchEvent(new KeyboardEvent('keydown', { ...${JSON.stringify(searchShortcut)}, bubbles: true, cancelable: true }));
+      await wait(() => !$('#terminal-search').hidden && document.activeElement === $('#terminal-search-input'));
       $('#terminal-search-input').value = 'needle-中文'; $('#terminal-search-input').dispatchEvent(new Event('input'));
       await wait(() => $('#terminal-search-count').textContent.endsWith(' / 4'));
       await wait(() => $('.terminal-pane.active .xterm-rows').textContent.toLowerCase().includes('needle-中文'));
@@ -87,11 +92,22 @@ async function check(win, fixture) {
       await wait(() => $('#terminal-search-count').textContent === window.__qaSearchCount);
       $('#terminal-search-case').click(); await wait(() => $('#terminal-search-count').textContent.endsWith(' / 3'));
       $('#terminal-search-case').click(); await wait(() => $('#terminal-search-count').textContent.endsWith(' / 4'));
+      $('#terminal-search-input').value = 'll'; $('#terminal-search-input').dispatchEvent(new Event('input'));
+      await wait(() => $('#terminal-search-count').textContent.endsWith(' / 2'));
+      $('#terminal-search-word').click(); await wait(() => $('#terminal-search-count').textContent.endsWith(' / 1'));
+      $('#terminal-search-word').click(); await wait(() => $('#terminal-search-count').textContent.endsWith(' / 2'));
+      $('#terminal-search-regex').click();
+      $('#terminal-search-input').value = 'history row 6[89]'; $('#terminal-search-input').dispatchEvent(new Event('input'));
+      await wait(() => $('#terminal-search-count').textContent.endsWith(' / 2'));
+      $('#terminal-search-input').value = '[unclosed'; $('#terminal-search-input').dispatchEvent(new Event('input'));
+      await wait(() => !$('#terminal-search-error').hidden && $('#terminal-search-count').textContent === '无结果');
+      $('#terminal-search-regex').click();
+      await wait(() => $('#terminal-search-error').hidden);
       $('#terminal-search-input').value = '跨行匹配needle-中文'; $('#terminal-search-input').dispatchEvent(new Event('input'));
       await wait(() => $('#terminal-search-count').textContent === '1 / 1');
       [...document.querySelectorAll('.session')].find(row => row.textContent.includes('本地验收服务器')).querySelector('button').click();
       await wait(() => document.querySelectorAll('.tab').length === 2 && $('#status').textContent.includes('已连接'));
-      await wait(() => $('#terminal-search-count').textContent === '0 / 0');
+      await wait(() => $('#terminal-search-count').textContent === '无结果');
       $('.tab.active .close').click();
       await wait(() => document.querySelectorAll('.tab').length === 1 && $('#terminal-search-count').textContent === '1 / 1');
       $('#terminal-search-input').value = 'Success'; $('#terminal-search-input').dispatchEvent(new Event('input'));
@@ -113,7 +129,7 @@ async function check(win, fixture) {
     await run(`await wait(() => document.querySelector('.terminal-keyword'));
       $('#terminal-search-toggle').click(); $('#terminal-search-input').value = 'no-such-ui-search-value';
       $('#terminal-search-input').dispatchEvent(new Event('input'));
-      await wait(() => $('#terminal-search-count').textContent === '0 / 0');
+      await wait(() => $('#terminal-search-count').textContent === '无结果' && $('#terminal-search-count').dataset.empty === 'true');
       if (!$('#terminal-search-next').disabled || !$('#terminal-search-previous').disabled) throw new Error('Empty search navigation remained enabled');
       $('#terminal-search-input').dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true }));
       if (!$('#terminal-search').hidden) throw new Error('Escape did not close search');

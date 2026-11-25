@@ -233,6 +233,34 @@ async function check(win, fixture) {
     assert.equal(tabStyles.backgroundColor, rgbStr(currentTheme.background));
     assert.equal(tabStyles.color, rgbStr(currentTheme.ink));
 
+    // Verify 1px split divider and resizable/collapsible left sidebar.
+    const sidebarShortcut = process.platform === "darwin"
+      ? { key: "b", code: "KeyB", metaKey: true }
+      : { key: "b", code: "KeyB", ctrlKey: true };
+    const splitAndSidebar = await run(`
+      const areaStyle = getComputedStyle($('#terminal-area'));
+      const resizer = $('#sidebar-resizer');
+      const sidebar = $('.sidebar');
+      const beforeW = sidebar.getBoundingClientRect().width;
+      resizer.dispatchEvent(new PointerEvent('pointerdown', { button: 0, clientX: beforeW, pointerId: 1, bubbles: true }));
+      resizer.dispatchEvent(new PointerEvent('pointermove', { clientX: 320, pointerId: 1, bubbles: true }));
+      resizer.dispatchEvent(new PointerEvent('pointerup', { clientX: 320, pointerId: 1, bubbles: true }));
+      const resizedW = Math.round(sidebar.getBoundingClientRect().width);
+      resizer.dispatchEvent(new MouseEvent('dblclick', { bubbles: true }));
+      const resetW = Math.round(sidebar.getBoundingClientRect().width);
+      $('#sidebar-toggle').click();
+      const hiddenByBtn = $('.app-content').classList.contains('sidebar-hidden');
+      document.dispatchEvent(new KeyboardEvent('keydown', { ...${JSON.stringify(sidebarShortcut)}, bubbles: true, cancelable: true }));
+      const shownByKey = !$('.app-content').classList.contains('sidebar-hidden');
+      return { gap: areaStyle.gap, bg: areaStyle.backgroundColor, resizedW, resetW, hiddenByBtn, shownByKey };
+    `);
+    assert.equal(splitAndSidebar.gap, "1px");
+    assert.equal(splitAndSidebar.bg, rgbStr(currentTheme.variables.line));
+    assert.equal(splitAndSidebar.resizedW, 320);
+    assert.equal(splitAndSidebar.resetW, 248);
+    assert.equal(splitAndSidebar.hiddenByBtn, true);
+    assert.equal(splitAndSidebar.shownByKey, true);
+
     let hasRenameItem = false;
     Menu.buildFromTemplate = (items) => {
       const renameItem = items.find((item) => item.label === "重命名");

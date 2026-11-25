@@ -1,5 +1,11 @@
 # 更新记录
 
+## 0.10.14
+
+- 分屏界面升级为 VS Code 风格 1px 网格分割线，左右分屏与上下分屏边界清晰一致。
+- 左侧边栏支持左右拖动调整宽度（`180px ~ 480px`，悬停/拖动高亮蓝条，双击分割条复位，拖至极窄自动吸附隐藏）以及顶部栏图标 / `Ctrl+B`（macOS `Cmd+B`）一键隐藏与展开，宽度与显隐状态自动持久化。
+- 终端搜索全面复刻 VS Code Find Widget：停靠终端右上角，支持 `Ctrl+F`（macOS `Cmd+F`）呼出、`Aa` 区分大小写（`Alt+C`）、`ab` 全字匹配（`Alt+W`，内置正则边界编译绕过上游整词同行截断缺陷）、`.*` 正则表达式（`Alt+R`）与非法正则实时错误提示、`F3` / `Shift+F3` / `Enter` 跳转、`Alt+↑/↓` 搜索词历史、「无结果」红色提示态以及高对比度暖橙匹配高亮与滚动条概览标尺。
+
 ## 0.10.13
 
 - 修复打包配置 `package.json` `build.files` 遗漏 `src/command-history.cjs`，导致便携版 `.exe` 启动时主进程报 `Cannot find module './command-history.cjs'` 的问题。

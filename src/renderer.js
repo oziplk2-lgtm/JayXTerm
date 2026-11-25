@@ -14,6 +14,13 @@ import { terminalPasswordPrompt } from "./terminal-password-prompt.mjs";
 import { createTerminalLineTracker, isCommandHistoryShortcut } from "./terminal-history.mjs";
 import { installCommandHistory, tabHistoryMeta } from "./command-history-ui.js";
 import {
+  DEFAULT_SIDEBAR_WIDTH,
+  clampSidebarWidth,
+  shouldSnapCollapseSidebar,
+  isSidebarToggleShortcut,
+  isTerminalSearchShortcut,
+} from "./workspace-layout.mjs";
+import {
   collectLogicalTerminalLine,
   extractTerminalPathMatches,
   resolveRemoteClickPath,
@@ -60,6 +67,7 @@ let fontOptions = terminalFont(fontPreferences);
 let defaultEncoding = terminalDefaults.defaultEncoding;
 let highlightKeywords = false;
 let quickPasswordsEnabled = false;
+let terminalSearchEnabled = terminalDefaults.terminalSearchEnabled;
 let commandHistoryEnabled = terminalDefaults.commandHistoryEnabled;
 let predictiveEcho = true;
 const el = (tag, cls, text) => {
@@ -162,7 +170,8 @@ function updateSettings(settings) {
   renderBackground(settings.backgroundColor);
   renderTerminalFont(settings);
   renderKeywordHighlights(settings.highlightKeywords);
-  terminalSearch.setEnabled(settings.terminalSearchEnabled);
+  terminalSearchEnabled = settings.terminalSearchEnabled;
+  terminalSearch.setEnabled(terminalSearchEnabled);
   commandHistoryEnabled = settings.commandHistoryEnabled;
   commandHistory.setEnabled(commandHistoryEnabled);
   if (quickPasswordsEnabled !== settings.quickPasswordsEnabled) {
@@ -847,10 +856,23 @@ function createTerminal(session, id, { moving = false } = {}) {
   pane.addEventListener("copy", blockBrowserClipboard, true);
   pane.addEventListener("paste", blockBrowserClipboard, true);
   term.attachCustomKeyEventHandler((event) => {
+    const hasModal = Boolean(document.querySelector("dialog[open]"));
+    if (!hasModal && isSidebarToggleShortcut(event, { isMac: isMacPlatform })) {
+      event.preventDefault();
+      event.stopPropagation();
+      if (!event.repeat) toggleSidebar();
+      return false;
+    }
+    if (!hasModal && terminalSearchEnabled && isTerminalSearchShortcut(event, { isMac: isMacPlatform })) {
+      event.preventDefault();
+      event.stopPropagation();
+      if (!event.repeat) terminalSearch.open();
+      return false;
+    }
     if (
       commandHistoryEnabled &&
       isCommandHistoryShortcut(event, { isMac: isMacPlatform }) &&
-      !document.querySelector("dialog[open]")
+      !hasModal
     ) {
       event.preventDefault();
       event.stopPropagation();
@@ -2179,6 +2201,89 @@ $("#window-rename-form").onsubmit = async (event) => {
     toast(error.message);
   }
 };
+const SIDEBAR_WIDTH_KEY = "jayxterm:sidebar-width";
+const SIDEBAR_HIDDEN_KEY = "jayxterm:sidebar-hidden";
+const appContentEl = $(".app-content");
+const sidebarToggleBtn = $("#sidebar-toggle");
+const sidebarResizerEl = $("#sidebar-resizer");
+sidebarToggleBtn.title = `隐藏/显示侧栏（${isMacPlatform ? "Cmd" : "Ctrl"}+B）`;
+let sidebarWidth = (() => {
+  try {
+    const saved = Number(localStorage.getItem(SIDEBAR_WIDTH_KEY));
+    return saved > 0 ? clampSidebarWidth(saved, window.innerWidth) : DEFAULT_SIDEBAR_WIDTH;
+  } catch {
+    return DEFAULT_SIDEBAR_WIDTH;
+  }
+})();
+let sidebarHidden = (() => {
+  try {
+    return localStorage.getItem(SIDEBAR_HIDDEN_KEY) === "1";
+  } catch {
+    return false;
+  }
+})();
+function applySidebarState({ persist = false } = {}) {
+  sidebarWidth = clampSidebarWidth(sidebarWidth, window.innerWidth);
+  document.documentElement.style.setProperty("--sidebar-width", `${sidebarWidth}px`);
+  appContentEl.classList.toggle("sidebar-hidden", sidebarHidden);
+  sidebarToggleBtn.setAttribute("aria-pressed", String(!sidebarHidden));
+  sidebarToggleBtn.setAttribute("aria-label", sidebarHidden ? "显示侧栏" : "隐藏侧栏");
+  if (persist) {
+    try {
+      localStorage.setItem(SIDEBAR_WIDTH_KEY, String(sidebarWidth));
+      localStorage.setItem(SIDEBAR_HIDDEN_KEY, sidebarHidden ? "1" : "0");
+    } catch {
+      // Ignore storage errors.
+    }
+  }
+}
+function toggleSidebar(force) {
+  sidebarHidden = typeof force === "boolean" ? force : !sidebarHidden;
+  applySidebarState({ persist: true });
+}
+applySidebarState({ persist: false });
+sidebarToggleBtn.onclick = () => toggleSidebar();
+sidebarResizerEl.ondblclick = () => {
+  sidebarWidth = DEFAULT_SIDEBAR_WIDTH;
+  sidebarHidden = false;
+  applySidebarState({ persist: true });
+};
+sidebarResizerEl.addEventListener("pointerdown", (event) => {
+  if (event.button !== 0) return;
+  event.preventDefault();
+  sidebarResizerEl.setPointerCapture(event.pointerId);
+  sidebarResizerEl.classList.add("dragging");
+  document.body.classList.add("resizing-sidebar");
+  const startWidth = sidebarWidth;
+  const finish = () => {
+    sidebarResizerEl.classList.remove("dragging");
+    document.body.classList.remove("resizing-sidebar");
+    if (sidebarResizerEl.hasPointerCapture(event.pointerId)) {
+      sidebarResizerEl.releasePointerCapture(event.pointerId);
+    }
+    sidebarResizerEl.removeEventListener("pointermove", onMove);
+    sidebarResizerEl.removeEventListener("pointerup", finish);
+    sidebarResizerEl.removeEventListener("pointercancel", finish);
+    applySidebarState({ persist: true });
+  };
+  const onMove = (moveEvent) => {
+    const pointerX = moveEvent.clientX;
+    if (shouldSnapCollapseSidebar(pointerX)) {
+      sidebarWidth = startWidth;
+      sidebarHidden = true;
+      finish();
+      return;
+    }
+    sidebarWidth = clampSidebarWidth(pointerX, window.innerWidth);
+    document.documentElement.style.setProperty("--sidebar-width", `${sidebarWidth}px`);
+  };
+  sidebarResizerEl.addEventListener("pointermove", onMove);
+  sidebarResizerEl.addEventListener("pointerup", finish);
+  sidebarResizerEl.addEventListener("pointercancel", finish);
+});
+window.addEventListener("resize", () => {
+  if (!sidebarHidden) applySidebarState({ persist: false });
+});
 document.addEventListener("keydown", (e) => {
   if (
     e.ctrlKey &&
@@ -2201,6 +2306,22 @@ document.addEventListener("keydown", (e) => {
   } else if (e.ctrlKey && e.shiftKey && e.code === "KeyO") {
     e.preventDefault();
     $("#window-picker").click();
+  } else if (
+    !e.defaultPrevented &&
+    isSidebarToggleShortcut(e, { isMac: isMacPlatform }) &&
+    !document.querySelector("dialog[open]")
+  ) {
+    e.preventDefault();
+    if (!e.repeat) toggleSidebar();
+  } else if (
+    !e.defaultPrevented &&
+    terminalSearchEnabled &&
+    isTerminalSearchShortcut(e, { isMac: isMacPlatform }) &&
+    !document.querySelector("dialog[open]") &&
+    tabs.get(current)
+  ) {
+    e.preventDefault();
+    if (!e.repeat) terminalSearch.open();
   } else if (
     !e.defaultPrevented &&
     commandHistoryEnabled &&
