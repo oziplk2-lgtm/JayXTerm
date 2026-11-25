@@ -1,5 +1,11 @@
 # 初版验证记录
 
+## 2026-11-25（0.10.9）：会话标签顶部浅蓝横线、标签与主窗口重命名
+
+- 样式调整：`src/style.css` 将 `.tab` 的指示边线由 `border-bottom` 改为 `border-top: 2px solid transparent`，焦点标签 `.terminal-group.focused .tab.active` 仅设置 `border-top-color: var(--accent)`，移除 `color: var(--accent)` 字体高亮，文字保持 `var(--ink)`。
+- 标签与主窗口重命名：`src/windows.cjs`、`src/preload.cjs`、`index.html` 与 `src/renderer.js` 支持双击标签内联改名、标签右键「重命名」以及「工作台 → 重命名窗口…」弹窗改名，同步更新顶栏/SFTP/窗口标题并在跨窗口移动与复制时保留自定义名称。
+- 验证：54 项单元测试与完整 CI Smoke（26.6 秒）全部通过，`scripts/features-check.cjs` 校验活动标签 `borderTopWidth === "2px"`、`borderTopColor === accent`、`borderBottomWidth === "0px"`、`color === ink`、右键/双击标签重命名以及工作台重命名窗口全部正常。
+
 ## 2026-11-25：VS Code 风格主题字体、默认单击打开与终端 `Ctrl+左键` 打开文件
 
 - 配色与字体：`src/theme.mjs`、`src/app-settings.cjs` 与 `src/terminal-settings.mjs` 默认切换为 `#181818` 背景、`#cccccc` 前景、`#264f78` 选区蓝及 VS Code `terminalColorRegistry.ts` ANSI 16 色板；默认字体保持 `Cascadia Mono` 并补充 `Consolas, "Courier New", monospace` 回退链；默认文件和目录打开方式调整为 `"single"`（单击打开）。

@@ -10,6 +10,7 @@ contextBridge.exposeInMainWorld("api", {
   moveTab: (s) => ipcRenderer.invoke("windows:move", s),
   tabMenu: (id) => ipcRenderer.invoke("windows:tab-menu", id),
   windowTitle: (name) => ipcRenderer.send("windows:title", name),
+  renameWindow: (name) => ipcRenderer.invoke("windows:rename", name),
   windowTheme: (color) => ipcRenderer.send("window:theme", color),
   windowReply: (s) => ipcRenderer.send("window:reply", s),
   onWindow: (callback) => {

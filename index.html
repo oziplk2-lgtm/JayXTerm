@@ -18,6 +18,7 @@
           <button id="window-tools-menu" type="button" popovertarget="window-tools-options">工作台 <span aria-hidden="true">▾</span></button>
           <div id="window-tools-options" class="action-popover workbench-menu" popover aria-label="工作台">
             <span id="window-label" class="window-menu-label"></span>
+            <button id="rename-window" type="button">重命名窗口…</button>
             <button id="new-window" title="Ctrl+Shift+N">新窗口</button>
             <button id="move-tab" disabled>移出标签</button>
             <button id="window-picker" title="Ctrl+Shift+O">切换窗口…</button>
@@ -394,6 +395,16 @@ ABC xyz 0123456789 │ 中文字体预览，。！？</pre>
       <p>切换窗口，或把当前连接移到另一个窗口。</p>
       <div id="window-list"></div>
       <div class="dialog-actions"><button id="windows-close">关闭</button></div>
+    </dialog>
+    <dialog id="window-rename-dialog" aria-labelledby="window-rename-title">
+      <form id="window-rename-form">
+        <h2 id="window-rename-title">重命名窗口</h2>
+        <label>窗口名称（留空恢复默认）<input id="window-rename-input" name="name" maxlength="60" autocomplete="off" /></label>
+        <div class="dialog-actions">
+          <button id="window-rename-cancel" type="button">取消</button
+          ><button class="primary" type="submit">保存</button>
+        </div>
+      </form>
     </dialog>
     <div id="toast" role="status"></div>
     <script type="module" src="/src/renderer.js"></script>

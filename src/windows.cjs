@@ -173,10 +173,11 @@ function createWindows({
     );
     return win;
   }
+  const windowLabel = (win) => win.customWindowName || `窗口 ${win.windowNumber}`;
   ipcMain.handle("windows:ready", (e) => {
     const win = get(e.sender.id);
     win?.resolveReady();
-    return { id: e.sender.id, number: win?.windowNumber };
+    return { id: e.sender.id, number: win?.windowNumber, name: win?.customWindowName || "" };
   });
   ipcMain.handle("windows:new", () => create().webContents.id);
   ipcMain.handle("windows:list", () => list());
@@ -190,10 +191,17 @@ function createWindows({
   });
   ipcMain.on("windows:title", (e, name) => {
     const win = get(e.sender.id);
-    if (win)
-      win.setTitle(
-        `${name || "工作空间"} · JayXTerm · 窗口 ${win.windowNumber}`,
-      );
+    if (!win) return;
+    win.lastContentTitle = name || "工作空间";
+    win.setTitle(`${win.lastContentTitle} · JayXTerm · ${windowLabel(win)}`);
+  });
+  ipcMain.handle("windows:rename", (e, name) => {
+    const win = get(e.sender.id);
+    if (!win || win.isDestroyed()) return "";
+    const cleaned = typeof name === "string" ? name.trim().slice(0, 60) : "";
+    win.customWindowName = cleaned;
+    win.setTitle(`${win.lastContentTitle || "工作空间"} · JayXTerm · ${windowLabel(win)}`);
+    return windowLabel(win);
   });
   async function move(sender, id, targetId) {
     assertOwner(sender, id);
@@ -281,6 +289,11 @@ function createWindows({
     assertOwner(e.sender, id);
     const win = get(e.sender.id);
     const items = [
+      {
+        label: "重命名",
+        enabled: !moves.has(id),
+        click: () => emit(win, { type: "rename-tab", id }),
+      },
       {
         label: "复制会话及路径",
         enabled: states.get(id) === "ready" && !moves.has(id),

@@ -184,6 +184,70 @@ async function check(win, fixture) {
         /属于其他窗口/);
     other.close(); other = null;
     console.log("PASS: native tab duplication, independent SSH authentication, current path, GBK and live credentials");
+
+    // Verify top light-blue tab indicator without blue text highlight, plus tab & window rename.
+    const tabStyles = await run(`
+      const tab = $('.terminal-group.focused .tab.active');
+      const style = getComputedStyle(tab);
+      return {
+        topWidth: style.borderTopWidth,
+        topColor: style.borderTopColor,
+        bottomWidth: style.borderBottomWidth,
+        color: style.color,
+      };
+    `);
+    const currentTheme = createTheme("#224466");
+    const rgbStr = (hex) => `rgb(${hex.slice(1).match(/../g).map((v) => parseInt(v, 16)).join(", ")})`;
+    assert.equal(tabStyles.topWidth, "2px");
+    assert.equal(tabStyles.topColor, rgbStr(currentTheme.accent));
+    assert.equal(tabStyles.bottomWidth, "0px");
+    assert.equal(tabStyles.color, rgbStr(currentTheme.ink));
+
+    let hasRenameItem = false;
+    Menu.buildFromTemplate = (items) => {
+      const renameItem = items.find((item) => item.label === "重命名");
+      hasRenameItem = !!renameItem?.enabled;
+      return { popup() { renameItem.click(); } };
+    };
+    await run(`
+      $('.tab.active').dispatchEvent(new MouseEvent('contextmenu', { bubbles: true }));
+      await wait(() => !!$('.tab.active .tab-rename-input'));
+      const input = $('.tab.active .tab-rename-input');
+      input.value = '日志监控';
+      input.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', bubbles: true }));
+      await wait(() => $('.tab.active .tab-name').textContent === '日志监控');
+      if ($('#workspace-title').textContent !== '日志监控' || $('#focused-sftp').textContent !== '日志监控')
+        throw new Error('Tab rename did not sync workspace/SFTP titles');
+    `);
+    assert.ok(hasRenameItem, "Tab context menu missing rename item");
+    assert.ok(win.getTitle().startsWith("日志监控 ·"));
+    await run(`
+      $('.tab.active .tab-select').dispatchEvent(new MouseEvent('dblclick', { bubbles: true }));
+      await wait(() => !!$('.tab.active .tab-rename-input'));
+      const input = $('.tab.active .tab-rename-input');
+      input.value = '';
+      input.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', bubbles: true }));
+      await wait(() => $('.tab.active .tab-name').textContent === '本地验收服务器');
+
+      $('#window-tools-menu').click();
+      $('#rename-window').click();
+      await wait(() => $('#window-rename-dialog').open);
+      $('#window-rename-input').value = '开发主窗';
+      $('#window-rename-form').requestSubmit();
+      await wait(() => !$('#window-rename-dialog').open);
+      if ($('#window-label').textContent !== '开发主窗')
+        throw new Error('Window label was not updated');
+    `);
+    assert.ok(win.getTitle().endsWith("· 开发主窗"));
+    await run(`
+      $('#window-tools-menu').click();
+      $('#rename-window').click();
+      await wait(() => $('#window-rename-dialog').open);
+      $('#window-rename-input').value = '';
+      $('#window-rename-form').requestSubmit();
+      await wait(() => !$('#window-rename-dialog').open);
+    `);
+    console.log("PASS: top accent tab border without text highlight, tab rename, and window rename");
   } finally {
     Menu.buildFromTemplate = buildMenu;
     dialog.showMessageBox = originalDialog;

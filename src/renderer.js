@@ -652,7 +652,8 @@ async function duplicateTab(tab) {
     if (!tabs.has(tab.id) || tab.moving || tab.state !== "已连接") return;
     const id = await api.duplicate({ id: tab.id, directory, cols: tab.term.cols, rows: tab.term.rows });
     focusedGroup = tab.group;
-    createTerminal({ ...tab.session, encoding: tab.encoding }, id);
+    const duplicated = createTerminal({ ...tab.session, encoding: tab.encoding }, id);
+    if (tab.customTitle) applyTabTitle(duplicated, tab.customTitle);
   } catch (error) {
     toast(error.message);
   } finally {
@@ -916,21 +917,84 @@ $("#split-add").onclick = () => {
   addGroup();
   activate(current, false);
 };
+function tabDisplayTitle(tab) {
+  return tab?.customTitle || tab?.session.name || "";
+}
+function applyTabTitle(tab, nextTitle) {
+  if (!tab) return;
+  const cleaned = typeof nextTitle === "string" ? nextTitle.trim().slice(0, 100) : "";
+  tab.customTitle = cleaned && cleaned !== tab.session.name ? cleaned : "";
+  const title = tabDisplayTitle(tab);
+  if (tab.header) {
+    tab.header.label.textContent = title;
+    tab.header.element.title = title + " · 可拖到其他分屏 · 双击重命名";
+    tab.header.close.setAttribute("aria-label", "关闭 " + title);
+  }
+  if (current === tab.id) {
+    api.windowTitle(title);
+    $("#focused-sftp").textContent = title;
+    $("#workspace-title").textContent = title;
+  }
+}
+function beginTabRename(tab) {
+  if (!tab || !tabs.has(tab.id) || tab.moving || !tab.header) return;
+  const { element, select, label } = tab.header;
+  if (element.querySelector(".tab-rename-input")) return;
+  const input = el("input", "tab-rename-input");
+  input.type = "text";
+  input.maxLength = 100;
+  input.value = tabDisplayTitle(tab);
+  input.setAttribute("aria-label", "重命名终端标签");
+  element.draggable = false;
+  label.hidden = true;
+  select.append(input);
+  let finished = false;
+  const finish = (commit) => {
+    if (finished) return;
+    finished = true;
+    const value = input.value;
+    input.remove();
+    label.hidden = false;
+    element.draggable = !tab.moving;
+    if (commit) applyTabTitle(tab, value);
+    if (tabs.has(tab.id) && current === tab.id && !fileWorkspaceOpen) tab.term.focus();
+  };
+  input.onclick = (event) => event.stopPropagation();
+  input.ondblclick = (event) => event.stopPropagation();
+  input.onkeydown = (event) => {
+    event.stopPropagation();
+    if (event.key === "Enter") {
+      event.preventDefault();
+      finish(true);
+    } else if (event.key === "Escape") {
+      event.preventDefault();
+      finish(false);
+    }
+  };
+  input.onblur = () => finish(true);
+  input.focus();
+  input.select();
+}
 function createTabElement(tab) {
+  const title = tabDisplayTitle(tab);
   const element = el("div", "tab");
   const select = el("button", "tab-select");
-  const label = el("span", "tab-name", tab.session.name);
+  const label = el("span", "tab-name", title);
   const close = el("button", "close", "×");
   select.type = close.type = "button";
   select.append(el("span", "dot"), label);
   close.title = "关闭连接";
-  close.setAttribute("aria-label", "关闭 " + tab.session.name);
+  close.setAttribute("aria-label", "关闭 " + title);
   close.onclick = (event) => {
     event.stopPropagation();
     closeTab(tab.id);
   };
   element.append(select, close);
   element.onclick = () => activate(tab.id);
+  select.ondblclick = (event) => {
+    event.stopPropagation();
+    beginTabRename(tab);
+  };
   element.oncontextmenu = (event) => {
     event.preventDefault();
     api.tabMenu(tab.id).catch((error) => toast(error.message));
@@ -945,16 +1009,16 @@ function createTabElement(tab) {
     }
   };
   element.dataset.connection = tab.id;
-  element.title = tab.session.name + " · 可拖到其他分屏";
+  element.title = title + " · 可拖到其他分屏 · 双击重命名";
   element.ondragstart = (event) => {
-    if (tab.moving || event.target.closest(".close")) {
+    if (tab.moving || event.target.closest(".close, .tab-rename-input")) {
       event.preventDefault();
       return;
     }
     event.dataTransfer.setData(terminalDragType, tab.id);
     event.dataTransfer.effectAllowed = "move";
   };
-  return { element, select };
+  return { element, select, label, close };
 }
 function renderTabs() {
   for (const tab of tabs.values()) {
@@ -964,7 +1028,7 @@ function renderTabs() {
     const visible = tab.group.shown === tab.id;
     element.classList.toggle("active", visible);
     select.setAttribute("aria-pressed", String(visible));
-    element.draggable = !tab.moving;
+    element.draggable = !tab.moving && !element.querySelector(".tab-rename-input");
   }
 }
 function fitTerminal(t) {
@@ -997,14 +1061,15 @@ function activate(id, focus = true) {
     t.group.shown = id;
   }
   syncGroups();
-  api.windowTitle(t?.session.name || "工作空间");
-  $("#focused-sftp").textContent = t ? t.session.name : "SFTP";
+  const activeTitle = t ? tabDisplayTitle(t) : "";
+  api.windowTitle(activeTitle || "工作空间");
+  $("#focused-sftp").textContent = t ? activeTitle : "SFTP";
   $("#move-tab").disabled = !t || t.moving || t.state !== "已连接";
   $("#terminal-encoding").disabled = !t;
   $("#terminal-encoding").value = t?.encoding || "utf-8";
   $("#welcome").classList.toggle("hidden", tabs.size > 0 || fileWorkspaceOpen);
   $("#connected").classList.toggle("hidden", !tabs.size && !fileWorkspaceOpen);
-  $("#workspace-title").textContent = t ? t.session.name : "概览";
+  $("#workspace-title").textContent = t ? activeTitle : "概览";
   $("#welcome-new").textContent = sessions.length
     ? "＋ 新建会话"
     : "＋ 添加第一台服务器";
@@ -1673,6 +1738,10 @@ api.onWindow(async (m) => {
     if (quickPasswordsEnabled) quickPasswords.refresh();
     return;
   }
+  if (m.type === "rename-tab") {
+    beginTabRename(tabs.get(m.id));
+    return;
+  }
   if (m.type === "duplicate-tab") {
     await duplicateTab(tabs.get(m.id));
     return;
@@ -1740,6 +1809,7 @@ api.onWindow(async (m) => {
       try {
         result = {
           session: t.session,
+          customTitle: t.customTitle || "",
           encoding: t.encoding,
           path: t.path,
           shellDirectory: t.shellDirectory,
@@ -1755,6 +1825,7 @@ api.onWindow(async (m) => {
     } else if (m.action === "restore") {
       if (tabs.has(id)) throw new Error("目标窗口已有该连接");
       const t = createTerminal(m.payload.session, id, { moving: true });
+      if (m.payload.customTitle) applyTabTitle(t, m.payload.customTitle);
       t.encoding = m.payload.encoding;
       t.path = m.payload.path;
       t.shellDirectory = m.payload.shellDirectory;
@@ -1971,6 +2042,29 @@ $("#window-picker").onclick = async () => {
   $("#windows-dialog").showModal();
 };
 $("#windows-close").onclick = () => $("#windows-dialog").close();
+let customWindowName = "";
+$("#rename-window").onclick = () => {
+  $("#window-tools-options").hidePopover();
+  const input = $("#window-rename-input");
+  input.value = customWindowName;
+  input.placeholder = "窗口 " + windowNumber;
+  $("#window-rename-dialog").showModal();
+  input.focus();
+  input.select();
+};
+$("#window-rename-cancel").onclick = () => $("#window-rename-dialog").close();
+$("#window-rename-form").onsubmit = async (event) => {
+  event.preventDefault();
+  const value = $("#window-rename-input").value.trim().slice(0, 60);
+  try {
+    const label = await api.renameWindow(value);
+    customWindowName = value;
+    $("#window-label").textContent = label;
+    $("#window-rename-dialog").close();
+  } catch (error) {
+    toast(error.message);
+  }
+};
 document.addEventListener("keydown", (e) => {
   if (
     e.ctrlKey &&
@@ -1995,8 +2089,9 @@ document.addEventListener("keydown", (e) => {
     $("#window-picker").click();
   }
 });
-const { id: windowId, number: windowNumber } = await api.windowReady();
-$("#window-label").textContent = "窗口 " + windowNumber;
+const { id: windowId, number: windowNumber, name: initialWindowName } = await api.windowReady();
+customWindowName = initialWindowName || "";
+$("#window-label").textContent = customWindowName || ("窗口 " + windowNumber);
 try {
   const [savedSessions, settings, dragAvailable] = await Promise.all([
     api.sessions(), api.settings(), api.localDragAvailable(),
