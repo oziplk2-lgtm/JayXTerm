@@ -1,5 +1,9 @@
 # 更新记录
 
+## 0.10.8
+
+- 修复 CI 环境下 `settings-check` 终端 `Ctrl+左键` 链接测试换行残留导致路径识别拼接的偶现失败。
+
 ## 0.10.7
 
 - 界面与终端默认配色、字体回退链复刻 VS Code Dark 风格（默认深炭黑 `#181818`、前景 `#cccccc`、选区蓝 `#264f78` 与 VS Code ANSI 16 色板；默认字体 `Cascadia Mono`，可选切回 `Consolas`）。

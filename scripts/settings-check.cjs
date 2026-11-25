@@ -231,21 +231,33 @@ async function check(w) {
       const id = group?.querySelector(".tab.active")?.dataset.connection || window.__qaConnectionId;
       const pane = group?.querySelector(".terminal-pane.active") || $(".terminal-pane.active");
       pane.querySelector(".xterm-helper-textarea").focus();
-      window.api.send({ type: "input", id, data: "# /home/jay/README.md\\r\\n" });
-      await wait(() => pane.querySelector(".xterm-rows").textContent.includes("/home/jay/README.md"));
+      window.api.send({ type: "input", id, data: "\\r\\n\\r\\n# /home/jay/README.md\\r\\n" });
+      await wait(() => pane.querySelector(".xterm-rows").textContent.includes("# /home/jay/README.md"));
     `);
     const clickPoint = await winPointForTerminalText(w, "/home/jay/README.md");
     w.webContents.debugger.attach("1.3");
     try {
-      await w.webContents.debugger.sendCommand("Input.dispatchMouseEvent", {
-        type: "mouseMoved", x: clickPoint.x, y: clickPoint.y, modifiers: mod,
+      await w.webContents.debugger.sendCommand("Input.dispatchKeyEvent", {
+        type: "keyDown", key: "Control", code: "ControlLeft", windowsVirtualKeyCode: 17, modifiers: mod,
       });
-      await new Promise(resolve => setTimeout(resolve, 60));
+      for (let attempt = 0; attempt < 10; attempt++) {
+        await w.webContents.debugger.sendCommand("Input.dispatchMouseEvent", {
+          type: "mouseMoved", x: clickPoint.x, y: clickPoint.y, modifiers: mod,
+        });
+        await new Promise(resolve => setTimeout(resolve, 60));
+        const hovered = await w.webContents.executeJavaScript(
+          `!!document.querySelector(".terminal-pane.active .xterm.xterm-cursor-pointer")`,
+        );
+        if (hovered) break;
+      }
       await w.webContents.debugger.sendCommand("Input.dispatchMouseEvent", {
         type: "mousePressed", x: clickPoint.x, y: clickPoint.y, button: "left", clickCount: 1, modifiers: mod,
       });
       await w.webContents.debugger.sendCommand("Input.dispatchMouseEvent", {
         type: "mouseReleased", x: clickPoint.x, y: clickPoint.y, button: "left", clickCount: 1, modifiers: mod,
+      });
+      await w.webContents.debugger.sendCommand("Input.dispatchKeyEvent", {
+        type: "keyUp", key: "Control", code: "ControlLeft", windowsVirtualKeyCode: 17, modifiers: 0,
       });
     } finally {
       w.webContents.debugger.detach();
@@ -257,7 +269,16 @@ async function check(w) {
       if (terminalEditor) break;
       await new Promise(resolve => setTimeout(resolve, 50));
     }
-    assert.ok(terminalEditor, "Ctrl+Click on terminal file path did not open the editor");
+    if (!terminalEditor) {
+      const diag = await w.webContents.executeJavaScript(`({
+        toast: document.querySelector("#toast")?.textContent,
+        pointer: !!document.querySelector(".terminal-pane.active .xterm.xterm-cursor-pointer"),
+        cols: document.querySelector(".terminal-pane.active")?.dataset.cols,
+        rows: document.querySelector(".terminal-pane.active .xterm-rows")?.children.length,
+        rect: document.querySelector(".terminal-pane.active .xterm-screen")?.getBoundingClientRect(),
+      })`);
+      throw new Error("Ctrl+Click did not open editor: " + JSON.stringify({ clickPoint, diag }));
+    }
     await terminalEditor.webContents.executeJavaScript(`(async () => {
       for (let i = 0; i < 100; i++) {
         if (document.querySelector(".monaco-editor")) return;
