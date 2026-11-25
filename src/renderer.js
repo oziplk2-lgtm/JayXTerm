@@ -10,6 +10,9 @@ import { fileIcon, trashIcon } from "./file-icons.js";
 import { installQuickPasswords } from "./quick-passwords.js";
 import { installTerminalEcho } from "./terminal-echo.mjs";
 import { resolveTerminalClipboardShortcut } from "./terminal-clipboard.mjs";
+import { terminalPasswordPrompt } from "./terminal-password-prompt.mjs";
+import { createTerminalLineTracker, isCommandHistoryShortcut } from "./terminal-history.mjs";
+import { installCommandHistory, tabHistoryMeta } from "./command-history-ui.js";
 import {
   collectLogicalTerminalLine,
   extractTerminalPathMatches,
@@ -57,6 +60,7 @@ let fontOptions = terminalFont(fontPreferences);
 let defaultEncoding = terminalDefaults.defaultEncoding;
 let highlightKeywords = false;
 let quickPasswordsEnabled = false;
+let commandHistoryEnabled = terminalDefaults.commandHistoryEnabled;
 let predictiveEcho = true;
 const el = (tag, cls, text) => {
   const n = document.createElement(tag);
@@ -111,14 +115,56 @@ function renderKeywordHighlights(enabled) {
 function showTerminal() {
   if (fileWorkspaceOpen) toggleFileWorkspace(false);
 }
+function readTerminalLogicalLine(term) {
+  const buffer = term.buffer.active;
+  if (buffer.type !== "normal") return "";
+  let start = buffer.baseY + buffer.cursorY;
+  while (start > 0 && buffer.getLine(start)?.isWrapped) start--;
+  let text = "";
+  for (let row = start; row < buffer.length; row++) {
+    const line = buffer.getLine(row);
+    if (!line || (row > start && !line.isWrapped)) break;
+    text += line.translateToString(false);
+  }
+  return text.trimEnd();
+}
+function recordTabCommand(tab, command) {
+  if (!commandHistoryEnabled || !tab || !command) return;
+  const meta = tabHistoryMeta(tab);
+  api
+    .recordCommandHistory({ command, ...meta })
+    .then((saved) => {
+      if (saved) commandHistory.refresh();
+    })
+    .catch(() => {});
+}
 const terminalSearch = installTerminalSearch({ getActiveTab: () => tabs.get(current), showTerminal, getTheme: () => theme });
 const quickPasswords = installQuickPasswords({ api, getActiveTab: () => tabs.get(current), showTerminal, toast });
+const commandHistory = installCommandHistory({
+  api,
+  getActiveTab: () => tabs.get(current),
+  showTerminal,
+  sendCommand: (tab, cmd, { execute }) => {
+    if (execute) {
+      tab.historyTracker?.reset();
+      api.send({ type: "input", id: tab.id, data: cmd + "\r" });
+      recordTabCommand(tab, cmd);
+    } else {
+      tab.historyTracker?.feed(cmd, { isNormalBuffer: true, isPasswordPrompt: false });
+      api.send({ type: "input", id: tab.id, data: cmd });
+    }
+  },
+  toast,
+  isMac: isMacPlatform,
+});
 function updateSettings(settings) {
   settingsPanel.setSaved(settings);
   renderBackground(settings.backgroundColor);
   renderTerminalFont(settings);
   renderKeywordHighlights(settings.highlightKeywords);
   terminalSearch.setEnabled(settings.terminalSearchEnabled);
+  commandHistoryEnabled = settings.commandHistoryEnabled;
+  commandHistory.setEnabled(commandHistoryEnabled);
   if (quickPasswordsEnabled !== settings.quickPasswordsEnabled) {
     quickPasswordsEnabled = settings.quickPasswordsEnabled;
     quickPasswords.setEnabled(quickPasswordsEnabled);
@@ -765,6 +811,7 @@ function createTerminal(session, id, { moving = false } = {}) {
   if (quickPasswordsEnabled) tab.passwordPrompt = quickPasswords.watch(tab);
   tab.echo = installTerminalEcho(tab, predictiveEcho);
   tab.fileLinks = installTerminalFileLinks(term, tab);
+  tab.historyTracker = createTerminalLineTracker();
   term.parser.registerOscHandler(7, (value) => {
     const match = /^file:\/\/([^/]*)(\/[^\x00-\x1f]*)$/.exec(value);
     if (!match) return true;
@@ -800,6 +847,16 @@ function createTerminal(session, id, { moving = false } = {}) {
   pane.addEventListener("copy", blockBrowserClipboard, true);
   pane.addEventListener("paste", blockBrowserClipboard, true);
   term.attachCustomKeyEventHandler((event) => {
+    if (
+      commandHistoryEnabled &&
+      isCommandHistoryShortcut(event, { isMac: isMacPlatform }) &&
+      !document.querySelector("dialog[open]")
+    ) {
+      event.preventDefault();
+      event.stopPropagation();
+      if (!event.repeat) commandHistory.toggle();
+      return false;
+    }
     const action = resolveTerminalClipboardShortcut(event, {
       hasSelection: term.hasSelection(),
       isMac: isMacPlatform,
@@ -823,6 +880,14 @@ function createTerminal(session, id, { moving = false } = {}) {
   };
   term.onData((data) => {
     if (quickPasswordsEnabled) quickPasswords.userInput(tab);
+    if (commandHistoryEnabled && !tab.moving && tab.state === "已连接") {
+      const captured = tab.historyTracker.feed(data, {
+        isNormalBuffer: term.buffer.active.type === "normal",
+        isPasswordPrompt: Boolean(terminalPasswordPrompt(term)),
+        readCurrentLine: () => readTerminalLogicalLine(term),
+      });
+      for (const cmd of captured) recordTabCommand(tab, cmd);
+    }
     tab.echo.input(data);
     if (!tab.moving) api.send({ type: "input", id, data });
   });
@@ -1120,6 +1185,7 @@ function activate(id, focus = true) {
   renderTabs();
   terminalSearch.activate();
   quickPasswords.activate();
+  commandHistory.activate();
   if (t) {
     if (!fileWorkspaceOpen)
       requestAnimationFrame(() => {
@@ -1782,6 +1848,10 @@ api.onWindow(async (m) => {
     if (quickPasswordsEnabled) quickPasswords.refresh();
     return;
   }
+  if (m.type === "command-history-changed") {
+    if (commandHistoryEnabled) commandHistory.refresh();
+    return;
+  }
   if (m.type === "rename-tab") {
     beginTabRename(tabs.get(m.id));
     return;
@@ -2131,6 +2201,14 @@ document.addEventListener("keydown", (e) => {
   } else if (e.ctrlKey && e.shiftKey && e.code === "KeyO") {
     e.preventDefault();
     $("#window-picker").click();
+  } else if (
+    !e.defaultPrevented &&
+    commandHistoryEnabled &&
+    isCommandHistoryShortcut(e, { isMac: isMacPlatform }) &&
+    !document.querySelector("dialog[open]")
+  ) {
+    e.preventDefault();
+    if (!e.repeat) commandHistory.toggle();
   }
 });
 const { id: windowId, number: windowNumber, name: initialWindowName } = await api.windowReady();

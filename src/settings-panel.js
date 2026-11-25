@@ -3,7 +3,7 @@ import { installFontPicker } from "./font-picker.js";
 import { normalizeHexColor } from "./color-picker-utils.mjs";
 
 // Add sections in the markup and fields here; loading/saving and navigation stay shared.
-const fields = ["backgroundColor", "fontFamily", "cjkFontFamily", "fontSize", "defaultEncoding", "highlightKeywords", "terminalSearchEnabled", "quickPasswordsEnabled", "predictiveEcho", "fileOpen", "saveHistory"];
+const fields = ["backgroundColor", "fontFamily", "cjkFontFamily", "fontSize", "defaultEncoding", "highlightKeywords", "terminalSearchEnabled", "commandHistoryEnabled", "quickPasswordsEnabled", "predictiveEcho", "fileOpen", "saveHistory"];
 export function installSettingsPanel({ api, previewColor, previewFont, previewKeywords, onSave, toast }) {
   const $ = (selector) => document.querySelector(selector);
   const dialog = $("#settings-dialog"), form = $("#settings-form");
@@ -117,6 +117,18 @@ export function installSettingsPanel({ api, previewColor, previewFont, previewKe
     } catch (error) { $("#settings-error").textContent = error.message; }
   };
   $("#settings-default-cache").onclick = () => { cacheChoice = ""; renderCache(); };
+  $("#settings-clear-command-history").onclick = async () => {
+    const button = $("#settings-clear-command-history");
+    button.disabled = true;
+    try {
+      const result = await api.clearCommandHistory({});
+      toast(result?.removed ? `已清空 ${result.removed} 条历史命令` : "当前没有可清空的历史命令");
+    } catch (error) {
+      $("#settings-error").textContent = error.message;
+    } finally {
+      button.disabled = false;
+    }
+  };
   $("#settings-cancel").onclick = () => dialog.close();
   dialog.addEventListener("close", () => {
     if (saved) { previewColor(saved.backgroundColor); previewFont(saved); previewKeywords(saved.highlightKeywords); }

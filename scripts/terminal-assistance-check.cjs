@@ -131,7 +131,61 @@ async function check(win, fixture) {
     stream.write("\x1b[3J\x1b[2J\x1b[HSuccess after disable\r\n");
     await run(`await wait(() => $('.terminal-pane.active .xterm-rows').textContent.includes('Success after disable'));
       if ($('.terminal-keyword')) throw new Error('New terminal output was still highlighted');`);
-    console.log("PASS: keyword colors, Unicode cells, alternate-screen exclusion, scrollback/wrapped search, navigation, tab scope, compact SVG file and delete icons");
+
+    console.log("Checking command history recording, palette search, pin, safe Enter fill and Ctrl+Enter run");
+    const historyShortcut = process.platform === "darwin"
+      ? { key: "H", code: "KeyH", metaKey: true, shiftKey: true }
+      : { key: "H", code: "KeyH", ctrlKey: true, shiftKey: true };
+    const runEnterModifier = process.platform === "darwin" ? { metaKey: true } : { ctrlKey: true };
+    await run(`
+      await api.clearCommandHistory({});
+      const listBefore = await api.commandHistory();
+      if (!listBefore.enabled) throw new Error('Command history should be enabled by default');
+      const termInput = $('.terminal-pane.active .xterm-helper-textarea');
+      if (!termInput) throw new Error('Missing xterm textarea');
+      const hostKey = 'jay@127.0.0.1:' + ${fixture.server.address().port};
+      await api.recordCommandHistory({ command: 'echo HISTORY_TEST_ONE', scopeKey: 'session:qa-other', hostKey: 'jay@other:22', sessionName: '其他主机' });
+      const activeScope = await api.recordCommandHistory({ command: 'ls -la /home/jay', scopeKey: 'host:' + hostKey, hostKey, sessionName: '本地验收服务器' });
+      if (!activeScope) throw new Error('Failed to record active command history');
+      const skipped = await api.recordCommandHistory({ command: ' secret-space-cmd', scopeKey: 'host:' + hostKey, hostKey, sessionName: '本地验收服务器' });
+      if (skipped !== null) throw new Error('Leading-space command should not be recorded');
+      document.dispatchEvent(new KeyboardEvent('keydown', { ...${JSON.stringify(historyShortcut)}, bubbles: true, cancelable: true }));
+      await wait(() => !$('#command-history-palette').hidden && document.querySelectorAll('#command-history-list .command-history-item').length >= 1);
+      $('#command-history-input').value = 'ls home';
+      $('#command-history-input').dispatchEvent(new Event('input'));
+      await wait(() => document.querySelectorAll('#command-history-list .command-history-item').length === 1);
+      $('#command-history-list .history-pin').click();
+      await wait(() => !!$('#command-history-list .history-pin.pinned'));
+    `);
+    fs.writeFileSync(path.resolve(".codex-cache/qa/command-history-palette.png"), (await win.webContents.capturePage()).toPNG());
+    const fillStart = fixture.inputRecords.length;
+    await run(`
+      $('#command-history-input').dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', bubbles: true, cancelable: true }));
+      await wait(() => $('#command-history-palette').hidden);
+    `);
+    await new Promise((resolve) => setTimeout(resolve, 150));
+    const fillInput = Buffer.concat(fixture.inputRecords.slice(fillStart).map((r) => r.data)).toString("utf8");
+    assert.equal(fillInput, "ls -la /home/jay", "Enter in history palette must fill without sending carriage return");
+
+    const runStart = fixture.inputRecords.length;
+    await run(`
+      $('#terminal-history-toggle').click();
+      await wait(() => !$('#command-history-palette').hidden);
+      $('#command-history-input').value = '';
+      $('#command-history-input').dispatchEvent(new Event('input'));
+      document.querySelector('[data-history-scope="all"]').click();
+      await wait(() => document.querySelectorAll('#command-history-list .command-history-item').length >= 2);
+      $('#command-history-input').value = 'HISTORY_TEST_ONE';
+      $('#command-history-input').dispatchEvent(new Event('input'));
+      await wait(() => document.querySelectorAll('#command-history-list .command-history-item').length === 1);
+      $('#command-history-input').dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', ...${JSON.stringify(runEnterModifier)}, bubbles: true, cancelable: true }));
+      await wait(() => $('#command-history-palette').hidden);
+      await api.clearCommandHistory({});
+    `);
+    await new Promise((resolve) => setTimeout(resolve, 150));
+    const runInput = Buffer.concat(fixture.inputRecords.slice(runStart).map((r) => r.data)).toString("utf8");
+    assert.equal(runInput, "echo HISTORY_TEST_ONE\r", "Ctrl/Cmd+Enter in history palette must send command with carriage return");
+    console.log("PASS: keyword colors, Unicode cells, alternate-screen exclusion, scrollback/wrapped search, navigation, tab scope, compact SVG file and delete icons, and command history palette");
   } finally {
     await run(`if ($('#settings-dialog').open) $('#settings-cancel').click();
       if (!$('#terminal-search').hidden) $('#terminal-search-close').click();

@@ -5,6 +5,7 @@ export const terminalDefaults = {
   defaultEncoding: "utf-8",
   highlightKeywords: true,
   terminalSearchEnabled: true,
+  commandHistoryEnabled: true,
   quickPasswordsEnabled: false,
   predictiveEcho: true,
 };

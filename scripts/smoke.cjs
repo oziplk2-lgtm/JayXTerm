@@ -9,7 +9,7 @@ process.env.JAYXTERM_QA = "1";
 app.on("browser-window-created", (_event, win) => {
   win.webContents.setBackgroundThrottling(false);
 });
-for (const name of ["sessions.json", "settings.json", "quick-passwords.json"])
+for (const name of ["sessions.json", "settings.json", "quick-passwords.json", "command-history.json"])
   fs.rmSync(path.resolve(".codex-cache/qa/profile", name), { force: true });
 require("../src/main.cjs");
 app.whenReady().then(async () => {

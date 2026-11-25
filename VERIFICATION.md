@@ -1,5 +1,11 @@
 # 初版验证记录
 
+## 2026-11-25（0.10.11）：会话窗口历史命令保存、检索与安全复用
+
+- 存储与采集：新增 `src/command-history.cjs`（`openStore` 原子写入 `0o600`、按会话去重、次数统计、收藏永不淘汰、容量上限、敏感词与前导空格过滤）与 `src/terminal-history.mjs`（普通缓冲区行追踪、`Tab`/方向键提示符提取、多词分词过滤、`Ctrl+Shift+H`/`Cmd+Shift+H` 快捷键解析）。
+- 面板与设置：新增 `src/command-history-ui.js`，在状态栏增加「历史」按钮并在工作台顶部居中弹出 VS Code 命令面板式浮层（当前会话 / 全部会话 / 收藏、↑↓ 导航、`Enter`/`Tab` 仅填入命令行不回车、`Ctrl/Cmd+Enter` 直接执行、星标收藏/复制/删除/清空），在「设置 → 终端」新增「记录终端历史命令」开关与「清空历史」按钮。
+- 验证：57 项单元测试（含新增 `src/command-history.test.cjs` 3 组用例）与完整 CI Smoke（27.1 秒）全部通过；`scripts/terminal-assistance-check.cjs` 真实检验 `Ctrl+Shift+H` 呼出浮层、分词检索、星标收藏、`Enter` 仅填入（不发送 `\r`）以及 `Ctrl+Enter` 直接执行（发送 `\r`）并核对渲染截图。
+
 ## 2026-11-25（0.10.10）：可折叠会话分组、VS Code 风格标签页与终端搜索框
 
 - 可折叠会话分组：`src/renderer.js` 与 `src/style.css` 将 `.group-heading` 升级为带旋转箭头与条目计数的可点击折叠按钮，折叠状态持久化到 `localStorage`；搜索过滤时自动临时展开命中分组，新建或复制粘贴会话自动展开目标分组。

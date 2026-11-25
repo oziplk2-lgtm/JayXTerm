@@ -23,6 +23,7 @@ const { randomUUID } = require("node:crypto");
 const { openStore, validateSession } = require("./store.cjs");
 const { buildDuplicatedSession } = require("./session-duplicate.cjs");
 const { openAppSettings, validBackground } = require("./app-settings.cjs");
+const { openCommandHistory } = require("./command-history.cjs");
 const { openPasswordVault } = require("./password-vault.cjs");
 const { createTheme } = require("./theme.mjs");
 const { readImport, previewImport, applyImport, exportOpenSsh } = require("./session-exchange.cjs");
@@ -73,6 +74,7 @@ const appSettings = hasInstanceLock && openAppSettings(
 // before ready. Keep that path fixed and route only the windows' session.
 const windowCache = appSettings && appSettings.initializeCache({ restoreWindowsKey: process.platform === "win32" });
 let passwordVault;
+let commandHistoryStore;
 const active = new Map(),
   requests = new Map();
 const pendingPasswords = new Map();
@@ -558,6 +560,45 @@ ipcMain.handle("password-vault:fill", (event, { id, passwordId }) => {
   // Keep the secret out of the renderer and clipboard.
   send({ type: "input", id, data: vault.reveal(passwordId) + "\r" });
   return true;
+});
+function requireCommandHistory(event) {
+  if (!workspace?.get(event.sender.id) || event.senderFrame !== event.sender.mainFrame)
+    throw new Error("请在工作台中管理历史命令");
+  return commandHistoryStore ??= openCommandHistory(path.join(app.getPath("userData"), "command-history.json"));
+}
+function broadcastCommandHistory() {
+  workspace.broadcast({ type: "command-history-changed" });
+}
+ipcMain.handle("command-history:list", (event) => {
+  const enabled = appSettings.describe().commandHistoryEnabled;
+  const storeRef = requireCommandHistory(event);
+  return { enabled, items: enabled ? storeRef.list() : [] };
+});
+ipcMain.handle("command-history:record", (event, entry) => {
+  if (!appSettings.describe().commandHistoryEnabled) return null;
+  const recorded = requireCommandHistory(event).record(entry);
+  if (recorded) broadcastCommandHistory();
+  return recorded;
+});
+ipcMain.handle("command-history:pin", (event, id) => {
+  const updated = requireCommandHistory(event).togglePin(id);
+  if (updated) broadcastCommandHistory();
+  return updated;
+});
+ipcMain.handle("command-history:note", (event, { id, note }) => {
+  const updated = requireCommandHistory(event).updateNote(id, note);
+  if (updated) broadcastCommandHistory();
+  return updated;
+});
+ipcMain.handle("command-history:remove", (event, id) => {
+  const result = requireCommandHistory(event).remove(id);
+  if (result.removed) broadcastCommandHistory();
+  return result;
+});
+ipcMain.handle("command-history:clear", (event, options) => {
+  const result = requireCommandHistory(event).clear(options || {});
+  if (result.removed) broadcastCommandHistory();
+  return result;
 });
 ipcMain.handle("ssh:test", (e, input) => {
   const config = validateSession({

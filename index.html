@@ -88,6 +88,29 @@
           </aside>
         </aside>
         <main>
+          <section id="command-history-palette" class="command-history-palette" role="dialog" aria-label="终端历史命令" hidden>
+            <div class="command-history-top">
+              <div class="command-history-input-wrap">
+                <svg class="command-history-search-icon" viewBox="0 0 16 16" aria-hidden="true"><circle cx="7" cy="7" r="4.5"/><path d="m10.5 10.5 3 3"/></svg>
+                <input id="command-history-input" type="search" placeholder="搜索历史命令（空格分词）· Enter 填入 · Ctrl+Enter 执行" aria-label="搜索历史命令" autocomplete="off" />
+                <span id="command-history-count" class="command-history-count" aria-live="polite">0 条</span>
+                <button id="command-history-close" type="button" class="history-action" aria-label="关闭历史命令" title="关闭（Esc）"><svg viewBox="0 0 16 16" aria-hidden="true"><path d="M4.5 4.5 11.5 11.5M11.5 4.5 4.5 11.5"/></svg></button>
+              </div>
+              <div class="command-history-tabs" role="tablist" aria-label="历史范围">
+                <button type="button" role="tab" data-history-scope="session" aria-selected="true">当前会话</button>
+                <button type="button" role="tab" data-history-scope="all" aria-selected="false">全部会话</button>
+                <button type="button" role="tab" data-history-scope="pinned" aria-selected="false">收藏</button>
+                <button id="command-history-clear-scope" type="button" class="command-history-clear" hidden>清空当前会话</button>
+              </div>
+            </div>
+            <div id="command-history-list" class="command-history-list" role="listbox" aria-label="历史命令列表"></div>
+            <div class="command-history-footer">
+              <span><kbd>↑↓</kbd> 选择</span>
+              <span><kbd>Enter</kbd> 填入终端</span>
+              <span id="command-history-run-hint">Ctrl+Enter 执行</span>
+              <span><kbd>Esc</kbd> 关闭</span>
+            </div>
+          </section>
           <form id="terminal-search" class="terminal-search" role="search" aria-label="搜索当前终端" hidden>
             <div class="terminal-search-field">
               <input id="terminal-search-input" type="search" placeholder="查找" aria-label="终端搜索内容" autocomplete="off" maxlength="1000" />
@@ -119,6 +142,7 @@
           <span id="status">就绪</span
           ><span
             ><button id="terminal-passwords" type="button" aria-expanded="false" aria-controls="quick-password-picker" title="选择快捷密码填入当前终端并提交" hidden disabled>密码本</button>
+            <button id="terminal-history-toggle" type="button" aria-expanded="false" aria-controls="command-history-palette" title="历史命令（Ctrl+Shift+H）" hidden disabled><svg viewBox="0 0 20 20" aria-hidden="true"><circle cx="10" cy="10" r="6.5"/><path d="M10 6.5V10l2.5 1.8"/></svg>历史</button>
             <button id="terminal-search-toggle" type="button" aria-expanded="false" aria-controls="terminal-search" hidden disabled><svg viewBox="0 0 20 20" aria-hidden="true"><circle cx="8.5" cy="8.5" r="5.5"/><path d="m13 13 4 4"/></svg>搜索</button>
             <select id="terminal-encoding" aria-label="当前终端编码" disabled>
               <option value="utf-8">UTF-8</option>
@@ -195,6 +219,11 @@ ABC xyz 0123456789 │ 中文字体预览，。！？</pre>
               <p class="form-note keyword-legend"><span class="success">Success / Passed</span><span class="error">Fail / Error</span><span class="warning">Warning / Timeout</span><span class="keyword-info">Info / Debug</span></p>
               <p class="form-note">匹配不区分大小写，支持中文成功、失败、错误、警告和超时；保留原始输出。Vim 等全屏程序使用自身配色。</p>
               <label class="check"><input name="terminalSearchEnabled" type="checkbox" />终端搜索</label>
+              <div class="settings-inline-row">
+                <label class="check"><input id="settings-command-history" name="commandHistoryEnabled" type="checkbox" checked />记录终端历史命令</label>
+                <button id="settings-clear-command-history" type="button">清空历史</button>
+              </div>
+              <p class="form-note">仅记录普通 Shell 命令，自动跳过密码提示、全屏程序、前导空格及含密钥的命令；按 Ctrl+Shift+H（macOS Cmd+Shift+H）快速检索复用。</p>
               <label class="check"><input id="settings-predictive-echo" name="predictiveEcho" type="checkbox" checked />预测输入回显</label>
               <p class="form-note">网络较慢时提前显示已确认回显的普通英文命令输入；密码、中文输入和全屏程序保持远端回显。</p>
             </section>

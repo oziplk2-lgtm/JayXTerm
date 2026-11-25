@@ -110,7 +110,7 @@ function mask(secret) {
   return chars.slice(0, 2).join("") + "*".repeat(Math.min(chars.length - 4, 12)) + chars.slice(-2).join("");
 }
 
-const terminalToggles = ["highlightKeywords", "terminalSearchEnabled", "quickPasswordsEnabled", "predictiveEcho"];
+const terminalToggles = ["highlightKeywords", "terminalSearchEnabled", "commandHistoryEnabled", "quickPasswordsEnabled", "predictiveEcho"];
 
 function openAppSettings(file, defaultCache, safeStorage) {
   const store = openStore(file, defaults);
@@ -188,13 +188,13 @@ function openAppSettings(file, defaultCache, safeStorage) {
     },
     describe() {
       const { cachePath, pendingCache, cacheError, saveHistory, fileOpen, workspaceBackground,
-        fontFamily, cjkFontFamily, fontSize, defaultEncoding, highlightKeywords, terminalSearchEnabled, quickPasswordsEnabled,
+        fontFamily, cjkFontFamily, fontSize, defaultEncoding, highlightKeywords, terminalSearchEnabled, commandHistoryEnabled, quickPasswordsEnabled,
         predictiveEcho } = settings();
       return {
         cachePath, pendingCache: pendingCache?.path ?? null, cacheError, saveHistory, fileOpen, defaultCache,
         backgroundColor: validBackground(workspaceBackground) ? workspaceBackground : defaultBackground,
         defaultBackground,
-        fontFamily, cjkFontFamily, fontSize, defaultEncoding, highlightKeywords, terminalSearchEnabled, quickPasswordsEnabled,
+        fontFamily, cjkFontFamily, fontSize, defaultEncoding, highlightKeywords, terminalSearchEnabled, commandHistoryEnabled, quickPasswordsEnabled,
         predictiveEcho,
       };
     },
