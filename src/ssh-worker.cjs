@@ -158,6 +158,25 @@ function shellDirectory(connection) {
   }).finally(() => { connection.directoryQuery = null; });
   return connection.directoryQuery;
 }
+const SFTP_IDLE_MS = 120000;
+function clearSftpIdle(connection) {
+  if (connection?.sftpIdleTimer) {
+    clearTimeout(connection.sftpIdleTimer);
+    connection.sftpIdleTimer = null;
+  }
+}
+function touchSftpIdle(connection) {
+  if (!connection) return;
+  clearSftpIdle(connection);
+  if (!connection.sftpPromise) return;
+  connection.sftpIdleTimer = setTimeout(() => {
+    connection.sftpIdleTimer = null;
+    if (!connection.sftpPromise || connection.transferring) return;
+    const pending = connection.sftpPromise;
+    connection.sftpPromise = null;
+    pending.then((sftp) => { try { sftp.end(); } catch {} }, () => {});
+  }, SFTP_IDLE_MS);
+}
 function getSftp(connection) {
   if (!connection?.stream) throw new Error("SSH 尚未连接");
   if (!connection.sftpPromise) {
@@ -168,7 +187,10 @@ function getSftp(connection) {
     );
     connection.sftpPromise = opening;
     const reset = () => {
-      if (connection.sftpPromise === opening) connection.sftpPromise = null;
+      if (connection.sftpPromise === opening) {
+        connection.sftpPromise = null;
+        clearSftpIdle(connection);
+      }
     };
     opening.then((sftp) => {
       sftp.once("end", () => {
@@ -177,7 +199,10 @@ function getSftp(connection) {
       });
       sftp.once("close", reset);
       sftp.on("error", reset);
+      touchSftpIdle(connection);
     }, reset);
+  } else {
+    touchSftpIdle(connection);
   }
   return connection.sftpPromise;
 }
@@ -221,6 +246,9 @@ process.on("message", async (m) => {
         const rest = c.utf8.end();
         if (rest) c.batchChunks.push(rest);
         flushOutput(c);
+        clearSftpIdle(c);
+        c.sftpPromise = null;
+        c.batchChunks = [];
         destroyJumpClients(c);
         connections.delete(m.id);
         send({ type: "closed", id: m.id });
@@ -349,6 +377,9 @@ process.on("message", async (m) => {
     } else if (m.type === "disconnect") {
       if (c) {
         if (c.batchTimer) clearTimeout(c.batchTimer);
+        clearSftpIdle(c);
+        c.sftpPromise = null;
+        c.batchChunks = [];
         destroyJumpClients(c);
         c.client.destroy();
       }
@@ -476,6 +507,7 @@ process.on("message", async (m) => {
             });
           } else reject(new Error("未知文件操作"));
         });
+      touchSftpIdle(c);
       send({ type: "result", rid: m.rid, result });
     }
   } catch (e) {

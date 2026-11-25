@@ -139,6 +139,7 @@ export function installKeywordHighlights(term, theme) {
   scheduleNow();
   return {
     refresh: scheduleNow,
+    clear,
     setTheme(value) { theme = value; clear(); scheduleNow(); },
     dispose() {
       disposed = true;

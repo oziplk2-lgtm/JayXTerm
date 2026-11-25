@@ -1,5 +1,15 @@
 # 初版验证记录
 
+## 2026-11-25（0.10.17）：多标签内存占用深度优化
+
+- 渲染与 DOM 回收：`src/style.css` 将非活动 `.terminal-pane` 由 `visibility: hidden` 改为 `display: none` + `contain: strict`；`src/terminal-keywords.mjs` 暴露 `clear()`，`src/renderer.js` 在标签切入后台时立即清空关键词高亮 Marker/Decoration DOM 与本地回显覆盖层，后台输出改为 `120ms` / `32 KiB` 合批并在切回前台/跨窗移动时即时冲刷。
+- SFTP 懒加载与空闲释放：`src/renderer.js` 仅在侧栏远端文件面板可见或文件工作区打开时触发 `loadFiles`；`src/ssh-worker.cjs` 新增 `SFTP_IDLE_MS = 120000` 空闲 2 分钟自动关闭非传输态 SFTP 通道并在后续访问时按需重建。
+- 后台自动/手动收紧与泄漏清理：新增 `src/memory-trim.mjs` 与 `src/memory-trim.test.cjs`，隐藏空闲 ≥ 5 分钟自动将回滚缓冲收紧至 `1,000` 行（切回前台恢复用户配置）并裁剪 > 200 条的缓存文件列表；`index.html` 与 `src/renderer.js` 在工作台菜单新增「释放后台终端内存」（`#trim-background-memory`）按钮，并在 `closeTab` 完整清理定时器、输出队列、文件缓存与悬停链接归属。
+- 验证：
+  - 单元测试 `powershell -ExecutionPolicy Bypass -File scripts/windows.ps1 test`：65 / 65 项全部通过（1.3 秒，含新增 `src/memory-trim.test.cjs` 及 `src/package-files.test.cjs` 打包白名单校验）。
+  - 完整 CI Smoke（含 `LOCAL_DRAG` / `WORKSPACE` / `SESSION_EXCHANGE` / `SETTINGS` / `FEATURES` / `ASSIST` 全套检核）：34.3 秒全部通过，`scripts/features-check.cjs` 校验隐藏 `.terminal-pane` 为 `display: none` 且点击「释放后台终端内存」成功回收后台标签缓冲。
+  - 8 标签 × 3,000 行日志真实 Electron 基准：8 路 SSH 并发连接、7 个隐藏面板 100% 处于 `display: none`，渲染进程 JS Heap 稳定在 48.1 MB，点击「释放后台终端内存」后 Electron 总工作集由 487.4 MB 降至 464.1 MB（即时回收 23.3 MB）。
+
 ## 2026-11-25（0.10.16）：修复「新建文件」下拉菜单错位并取消编辑器 2 MiB 限制改为 5 MiB 提示
 
 - 新建文件修复：`src/renderer.js` 将 `#file-new-options` 纳入 `beforetoggle` 坐标定位并校验目录已解析；`index.html` 与 `src/renderer.js` 在新建文件弹窗新增「创建后立即打开编辑」；`src/ssh-worker.cjs` 对不支持 `O_EXCL`（`wx`）的精简 SFTP 服务端增加 `w` 回退。

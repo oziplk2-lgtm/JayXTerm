@@ -538,10 +538,11 @@ h1 {
   position: absolute;
   inset: 0;
   padding: 12px 10px 8px 14px;
-  visibility: hidden;
+  display: none;
+  contain: strict;
 }
 .terminal-pane.active {
-  visibility: visible;
+  display: block;
 }
 /* The fit addon measures its parent's border-box dimensions. Keep the pane
    padding outside the measured viewport so the last row fits. */

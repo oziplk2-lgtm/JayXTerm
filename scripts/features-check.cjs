@@ -163,6 +163,18 @@ async function check(win, fixture) {
     assert.equal(await run("return $('#terminal-encoding').value;"), "gbk");
     const duplicate = await run("return $('.tab.active').dataset.connection;");
     assert.notEqual(duplicate, source);
+    assert.equal(await run("return $('.tab.active').dataset.connection;"), duplicate);
+    const hiddenPaneDisplay = await run(`
+      const panes = [...document.querySelectorAll('.terminal-group.focused .terminal-pane')];
+      const hidden = panes.find(p => !p.classList.contains('active'));
+      if (!hidden) throw new Error('Expected a hidden background terminal pane');
+      const display = getComputedStyle(hidden).display;
+      $('#window-tools-menu').click();
+      $('#trim-background-memory').click();
+      return { display, toast: $('#toast').textContent };
+    `);
+    assert.equal(hiddenPaneDisplay.display, "none", "Inactive terminal panes must use display:none to free compositor layers");
+    assert.match(hiddenPaneDisplay.toast, /已释放 1 个后台标签的冗余缓冲/);
     await run("$('.tab.active .close').click();");
     await waitFor(() => fixture.streams.size === originalStreams.size);
     assert.ok([...originalStreams].every((stream) => fixture.streams.has(stream)));

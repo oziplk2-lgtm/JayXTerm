@@ -22,6 +22,11 @@ import {
 } from "./workspace-layout.mjs";
 import { sortAndFilterFiles, validateRemoteEntryName } from "./file-browser-utils.mjs";
 import {
+  BACKGROUND_TRIM_SCROLLBACK,
+  shouldTrimTab,
+  shouldPruneTabFiles,
+} from "./memory-trim.mjs";
+import {
   collectLogicalTerminalLine,
   extractTerminalPathMatches,
   resolveRemoteClickPath,
@@ -32,6 +37,7 @@ const api = window.api;
 const isMacPlatform = /\bMac/i.test(navigator.platform || navigator.userAgent);
 let linkModifierHeld = false;
 let hoveredTerminalLink = null;
+let hoveredTerminalLinkOwner = null;
 const isLinkModifier = (event) =>
   !!event && (isMacPlatform ? event.metaKey && !event.ctrlKey : event.ctrlKey && !event.metaKey) && !event.altKey;
 function syncHoveredLinkDecoration(held) {
@@ -189,7 +195,7 @@ function updateSettings(settings) {
   terminalScrollback = settings.scrollback || terminalDefaults.scrollback;
   for (const tab of tabs.values()) {
     tab.echo.setEnabled(predictiveEcho);
-    if (tab.term.options.scrollback !== terminalScrollback) {
+    if (!tab.scrollbackTrimmed && tab.term.options.scrollback !== terminalScrollback) {
       tab.term.options.scrollback = terminalScrollback;
     }
   }
@@ -327,12 +333,16 @@ function installTerminalFileLinks(term, tab) {
           },
           hover(event) {
             hoveredTerminalLink = link;
+            hoveredTerminalLinkOwner = tab;
             const held = isLinkModifier(event) || linkModifierHeld;
             link.decorations.underline = held;
             link.decorations.pointerCursor = held;
           },
           leave() {
-            if (hoveredTerminalLink === link) hoveredTerminalLink = null;
+            if (hoveredTerminalLink === link) {
+              hoveredTerminalLink = null;
+              hoveredTerminalLinkOwner = null;
+            }
             link.decorations.underline = false;
             link.decorations.pointerCursor = false;
           },
@@ -369,6 +379,7 @@ function setMode(mode) {
     $("#file-list").replaceChildren(
       el("div", "empty", "请先在会话中连接一台服务器。"),
     );
+  else if (files && t) ensureTabFilesLoaded(t);
 }
 $("#mode-sessions").onclick = () => setMode("sessions");
 $("#mode-files").onclick = () => setMode("files");
@@ -919,7 +930,16 @@ function createTerminal(session, id, { moving = false } = {}) {
     reconnectBar,
     reconnectMsg,
     reconnectBtn,
+    reconnectDismiss,
     zoomDelta: 0,
+    visible: false,
+    hiddenSince: null,
+    scrollbackTrimmed: false,
+    filesStale: false,
+    pendingDirectory: ".",
+    bgChunks: [],
+    bgBytes: 0,
+    bgTimer: null,
     state: "连接中",
     encoding: session.encoding || "utf-8",
     path: ".",
@@ -1169,6 +1189,90 @@ function mergeGroup(group, target) {
   if (focusedGroup === group) focusedGroup = target;
   activate(current || target.shown || nextInGroup(target));
 }
+function isFilesUiVisibleForTab(tab) {
+  if (!tab) return false;
+  if (fileWorkspaceOpen && tab.group.shown === tab.id) return true;
+  if (current === tab.id && !sidebarHidden && !$("#files-panel").classList.contains("hidden")) {
+    return true;
+  }
+  return false;
+}
+function ensureTabFilesLoaded(tab) {
+  if (!tab || !tab.filesStale || tab.loading || tab.moving || tab.state !== "已连接") return;
+  if (!isFilesUiVisibleForTab(tab)) return;
+  tab.filesStale = false;
+  const target = tab.pendingDirectory || tab.path || ".";
+  tab.pendingDirectory = null;
+  loadFiles(tab, target);
+}
+function flushBackgroundOutput(tab) {
+  if (!tab) return;
+  if (tab.bgTimer) {
+    clearTimeout(tab.bgTimer);
+    tab.bgTimer = null;
+  }
+  if (!tab.bgChunks?.length && !tab.bgBytes) return;
+  const chunks = tab.bgChunks;
+  const bytes = tab.bgBytes;
+  tab.bgChunks = [];
+  tab.bgBytes = 0;
+  const payload = chunks.every((c) => typeof c === "string")
+    ? chunks.join("")
+    : chunks[0];
+  const writeOne = (item, ackBytes) => {
+    const rendered = tab.echo.output(item);
+    tab.term.write(item, () => {
+      rendered();
+      if (ackBytes) api.send({ type: "ack", id: tab.id, bytes: ackBytes });
+    });
+  };
+  if (typeof payload === "string") {
+    writeOne(payload, bytes);
+  } else {
+    chunks.forEach((item, index) => writeOne(item, index === chunks.length - 1 ? bytes : 0));
+  }
+}
+function queueBackgroundOutput(tab, payload, bytes) {
+  tab.bgChunks.push(payload);
+  tab.bgBytes += bytes;
+  if (tab.bgBytes >= 32768) {
+    flushBackgroundOutput(tab);
+  } else if (!tab.bgTimer) {
+    tab.bgTimer = setTimeout(() => flushBackgroundOutput(tab), 120);
+  }
+}
+function trimBackgroundTabs({ force = false } = {}) {
+  if (tabs.size <= 1) return 0;
+  const now = Date.now();
+  let trimmedCount = 0;
+  for (const tab of tabs.values()) {
+    const isShown = tab.group.shown === tab.id;
+    if (isShown || tab.moving) continue;
+    let touched = false;
+    tab.highlights?.clear();
+    tab.echo.reset();
+    if (
+      (force && terminalScrollback > BACKGROUND_TRIM_SCROLLBACK && !tab.scrollbackTrimmed) ||
+      shouldTrimTab(tab, now, terminalScrollback)
+    ) {
+      tab.term.options.scrollback = Math.min(terminalScrollback, BACKGROUND_TRIM_SCROLLBACK);
+      tab.scrollbackTrimmed = true;
+      touched = true;
+    }
+    if (
+      (force && tab.files.length > 0 && !tab.loading) ||
+      shouldPruneTabFiles(tab, now)
+    ) {
+      tab.files = [];
+      tab.selected = null;
+      tab.filesStale = true;
+      touched = true;
+    }
+    if (touched) trimmedCount++;
+  }
+  return trimmedCount;
+}
+setInterval(() => trimBackgroundTabs({ force: false }), 60000);
 function syncGroups() {
   $("#terminal-area").dataset.count = groups.length;
   $("#split-add").disabled =
@@ -1185,8 +1289,27 @@ function syncGroups() {
       syncWorkspaceDirectory(tabs.get(group.shown));
     }
   }
-  for (const tab of tabs.values())
-    tab.pane.classList.toggle("active", tab.group.shown === tab.id);
+  const now = Date.now();
+  for (const tab of tabs.values()) {
+    const visible = tab.group.shown === tab.id;
+    const wasVisible = tab.visible;
+    tab.visible = visible;
+    tab.pane.classList.toggle("active", visible);
+    if (!visible && wasVisible) {
+      tab.hiddenSince = now;
+      tab.highlights?.clear();
+      tab.echo.reset();
+    } else if (visible && !wasVisible) {
+      tab.hiddenSince = null;
+      flushBackgroundOutput(tab);
+      if (tab.scrollbackTrimmed) {
+        tab.term.options.scrollback = terminalScrollback;
+        tab.scrollbackTrimmed = false;
+      }
+      tab.highlights?.refresh();
+      ensureTabFilesLoaded(tab);
+    }
+  }
 }
 $("#split-add").onclick = () => {
   if (!tabs.size) return;
@@ -1379,15 +1502,31 @@ function closeTab(id, disconnect = true) {
     return;
   }
   if (disconnect) api.send({ type: "disconnect", id });
+  if (t.bgTimer) {
+    clearTimeout(t.bgTimer);
+    t.bgTimer = null;
+  }
+  t.bgChunks = [];
+  t.bgBytes = 0;
+  if (hoveredTerminalLinkOwner === t) {
+    hoveredTerminalLink = null;
+    hoveredTerminalLinkOwner = null;
+  }
   clearCwdQuery(t);
   terminalSearch.remove(t);
   t.highlights?.dispose();
   t.passwordPrompt?.dispose();
   t.fileLinks?.dispose();
+  t.historyTracker?.reset();
   t.echo.dispose();
   t.term.dispose();
+  t.files = [];
+  t.selected = null;
+  if (t.reconnectBtn) t.reconnectBtn.onclick = null;
+  if (t.reconnectDismiss) t.reconnectDismiss.onclick = null;
   t.pane.remove();
   t.header?.element.remove();
+  t.header = null;
   tabs.delete(id);
   if (t.group.shown === id) {
     t.group.shown = nextInGroup(t.group);
@@ -1429,6 +1568,10 @@ api.onEvent((m) => {
     const payload = typeof m.text === "string"
       ? m.text
       : Uint8Array.from(atob(m.data), (c) => c.charCodeAt(0));
+    if (!t.visible && !t.moving) {
+      queueBackgroundOutput(t, payload, m.bytes);
+      return;
+    }
     const rendered = t.echo.output(payload);
     t.term.write(payload, () => {
       rendered();
@@ -1438,7 +1581,13 @@ api.onEvent((m) => {
     t.state = "已连接";
     hideReconnectBar(t);
     fitTerminal(t);
-    loadFiles(t, m.directory || ".");
+    if (isFilesUiVisibleForTab(t)) {
+      t.filesStale = false;
+      loadFiles(t, m.directory || ".");
+    } else {
+      t.filesStale = true;
+      t.pendingDirectory = m.directory || ".";
+    }
     if (fileWorkspaceOpen) syncWorkspaceDirectory(t);
     if (current === t.id) activate(t.id);
   } else if (m.type === "closed" || m.type === "error") {
@@ -2255,6 +2404,7 @@ api.onWindow(async (m) => {
       )
         throw new Error("当前会话暂时无法移动");
       markMoving(t, true);
+      flushBackgroundOutput(t);
       // Drain received terminal output before the one-off snapshot. Never poll buffers.
       await new Promise((resolve) => t.term.write("", resolve));
       const { SerializeAddon } = await import("@xterm/addon-serialize");
@@ -2317,6 +2467,11 @@ api.onWindow(async (m) => {
 $("#new-window").onclick = () => {
   $("#window-tools-options").hidePopover();
   api.newWindow();
+};
+$("#trim-background-memory").onclick = () => {
+  $("#window-tools-options").hidePopover();
+  const count = trimBackgroundTabs({ force: true });
+  toast(count ? `已释放 ${count} 个后台标签的冗余缓冲` : "当前没有可释放的后台标签缓冲");
 };
 const importDialog = $("#session-import-dialog");
 const importList = $("#session-import-rows");
@@ -2558,6 +2713,7 @@ function applySidebarState({ persist = false } = {}) {
 function toggleSidebar(force) {
   sidebarHidden = typeof force === "boolean" ? force : !sidebarHidden;
   applySidebarState({ persist: true });
+  if (!sidebarHidden) ensureTabFilesLoaded(tabs.get(current));
 }
 applySidebarState({ persist: false });
 sidebarToggleBtn.onclick = () => toggleSidebar();
