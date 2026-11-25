@@ -1,5 +1,10 @@
 # 更新记录
 
+## 0.10.13
+
+- 修复打包配置 `package.json` `build.files` 遗漏 `src/command-history.cjs`，导致便携版 `.exe` 启动时主进程报 `Cannot find module './command-history.cjs'` 的问题。
+- 新增 `src/package-files.test.cjs` 单元测试，自动校验主进程与预加载入口递归依赖的所有本地模块均已纳入打包清单，防止后续再发生打包漏文件。
+
 ## 0.10.12
 
 - 移除终端标签切换时的背景渐变延迟，与 VS Code 一致即时切换激活态，同时消除 CI 下 `features-check` 读取活动标签背景色命中过渡中间帧的偶现失败。

@@ -1,6 +1,6 @@
 {
   "name": "jayxterm",
-  "version": "0.10.12",
+  "version": "0.10.13",
   "description": "A focused SSH and SFTP desktop client",
   "private": true,
   "author": "JayXTerm contributors",
@@ -54,6 +54,7 @@
       "src/store.cjs",
       "src/session-exchange.cjs",
       "src/app-settings.cjs",
+      "src/command-history.cjs",
       "src/password-vault.cjs",
       "src/theme.mjs",
       "src/terminal-settings.mjs",

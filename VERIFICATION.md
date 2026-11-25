@@ -1,5 +1,11 @@
 # 初版验证记录
 
+## 2026-11-25（0.10.13）：修复打包清单遗漏 `src/command-history.cjs` 并新增打包依赖校验
+
+- 根因：`package.json` `build.files` 采用显式白名单，新增的 `src/command-history.cjs` 未加入列表，导致 electron-builder 打包后的便携版 `.exe` 启动时主进程抛出 `Cannot find module './command-history.cjs'`。
+- 修复：将 `src/command-history.cjs` 加入 `package.json` `build.files`，并新增 `src/package-files.test.cjs` 递归扫描 `src/main.cjs`、预加载脚本与 `ssh-worker.cjs` 的全部本地 `require()`，确保无一遗漏。
+- 验证：58 项单元测试全部通过，确认主进程全部本地模块均在 `build.files` 中。
+
 ## 2026-11-25（0.10.12）：修复 CI 标签背景过渡帧竞态
 
 - 根因：`src/style.css` 中 `.tab` 带有 `transition: background 0.12s`，在关闭相邻标签后立即读取活动标签 `getComputedStyle(tab).backgroundColor` 时，CI 较慢帧率下会采样到过渡态 `rgba(34, 68, 102, 0.973)`。
