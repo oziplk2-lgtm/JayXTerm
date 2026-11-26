@@ -1189,6 +1189,23 @@ function mergeGroup(group, target) {
   if (focusedGroup === group) focusedGroup = target;
   activate(current || target.shown || nextInGroup(target));
 }
+function saveTabScroll(tab) {
+  const buffer = tab?.term?.buffer?.active;
+  if (!buffer) return;
+  tab.savedScrollOffset = Math.max(0, buffer.baseY - buffer.viewportY);
+}
+function restoreTabScroll(tab, { clear = false } = {}) {
+  if (!tab?.term || tab.savedScrollOffset == null) return;
+  const offset = tab.savedScrollOffset;
+  const buffer = tab.term.buffer.active;
+  const targetLine = offset === 0 ? buffer.baseY : Math.max(0, buffer.baseY - offset);
+  if (offset === 0) {
+    if (buffer.viewportY !== buffer.baseY) tab.term.scrollToBottom();
+  } else if (buffer.viewportY !== targetLine) {
+    tab.term.scrollToLine(targetLine);
+  }
+  if (clear) tab.savedScrollOffset = null;
+}
 function isFilesUiVisibleForTab(tab) {
   if (!tab) return false;
   if (fileWorkspaceOpen && tab.group.shown === tab.id) return true;
@@ -1293,6 +1310,7 @@ function syncGroups() {
   for (const tab of tabs.values()) {
     const visible = tab.group.shown === tab.id;
     const wasVisible = tab.visible;
+    if (!visible && wasVisible && !fileWorkspaceOpen) saveTabScroll(tab);
     tab.visible = visible;
     tab.pane.classList.toggle("active", visible);
     if (!visible && wasVisible) {
@@ -1301,6 +1319,7 @@ function syncGroups() {
       tab.echo.reset();
     } else if (visible && !wasVisible) {
       tab.hiddenSince = null;
+      if (!fileWorkspaceOpen) restoreTabScroll(tab);
       flushBackgroundOutput(tab);
       if (tab.scrollbackTrimmed) {
         tab.term.options.scrollback = terminalScrollback;
@@ -1308,6 +1327,14 @@ function syncGroups() {
       }
       tab.highlights?.refresh();
       ensureTabFilesLoaded(tab);
+      if (!fileWorkspaceOpen) {
+        requestAnimationFrame(() => {
+          requestAnimationFrame(() => {
+            if (!tab.visible || fileWorkspaceOpen) return;
+            restoreTabScroll(tab, { clear: true });
+          });
+        });
+      }
     }
   }
 }
@@ -1452,7 +1479,21 @@ function fitTerminal(t) {
     t.group.shown !== t.id
   )
     return;
+  const buf = t.term.buffer.active;
+  const wasAtBottom = t.savedScrollOffset === 0 || buf.viewportY >= buf.baseY;
   t.fit.fit();
+  if (wasAtBottom) {
+    t.savedScrollOffset = 0;
+    t.term.scrollToBottom();
+  }
+  if (t.savedScrollOffset != null) {
+    requestAnimationFrame(() => {
+      requestAnimationFrame(() => {
+        if (!tabs.has(t.id) || fileWorkspaceOpen || t.group.shown !== t.id) return;
+        restoreTabScroll(t, { clear: true });
+      });
+    });
+  }
   t.pane.dataset.cols = t.term.cols;
   t.pane.dataset.rows = t.term.rows;
   // fit() emits nothing when the geometry is unchanged. Always resync a ready
@@ -1495,6 +1536,10 @@ function activate(id, focus = true) {
       requestAnimationFrame(() => {
         if (current !== t.id || fileWorkspaceOpen) return;
         fitTerminal(t);
+        requestAnimationFrame(() => {
+          if (current !== t.id || fileWorkspaceOpen) return;
+          restoreTabScroll(t, { clear: true });
+        });
         if (focus) t.term.focus();
       });
     $("#status").textContent =
@@ -2301,20 +2346,40 @@ async function syncWorkspaceDirectory(tab) {
   renderWorkspaceFiles(tab.group);
 }
 function toggleFileWorkspace(focus = true) {
-  fileWorkspaceOpen = !fileWorkspaceOpen;
+  const nextOpen = !fileWorkspaceOpen;
+  if (nextOpen) {
+    for (const tab of tabs.values()) {
+      if (tab.group.shown === tab.id) saveTabScroll(tab);
+    }
+  }
+  fileWorkspaceOpen = nextOpen;
   fileWorkspaceVersion++;
   $("#terminal-area").classList.toggle("show-file-space", fileWorkspaceOpen);
   const button = $("#file-workspace-toggle");
   button.querySelector("span").textContent = fileWorkspaceOpen ? "返回终端" : "文件空间";
   button.setAttribute("aria-pressed", String(fileWorkspaceOpen));
   highlightDropTarget(null);
+  if (!fileWorkspaceOpen) {
+    for (const group of groups) {
+      const tab = tabs.get(group.shown);
+      if (tab) restoreTabScroll(tab);
+    }
+  }
   activate(current, !fileWorkspaceOpen && focus);
   if (!fileWorkspaceOpen)
     requestAnimationFrame(() => {
       for (const group of groups) {
         const tab = tabs.get(group.shown);
-        if (tab && tab.id !== current) fitTerminal(tab);
+        if (!tab) continue;
+        if (tab.id !== current) fitTerminal(tab);
       }
+      requestAnimationFrame(() => {
+        if (fileWorkspaceOpen) return;
+        for (const group of groups) {
+          const tab = tabs.get(group.shown);
+          if (tab) restoreTabScroll(tab, { clear: true });
+        }
+      });
     });
 }
 $("#file-workspace-toggle").onclick = () => toggleFileWorkspace();
