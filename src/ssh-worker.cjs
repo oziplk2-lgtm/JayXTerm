@@ -239,10 +239,7 @@ process.on("message", async (m) => {
         size: { cols: m.cols || 100, rows: m.rows || 30 },
       };
       connections.set(m.id, c);
-      c.client.on("error", (e) =>
-        send({ type: "error", id: m.id, message: e.message }),
-      );
-      c.client.on("close", () => {
+      const finish = () => {
         const rest = c.utf8.end();
         if (rest) c.batchChunks.push(rest);
         flushOutput(c);
@@ -250,9 +247,12 @@ process.on("message", async (m) => {
         c.sftpPromise = null;
         c.batchChunks = [];
         destroyJumpClients(c);
-        connections.delete(m.id);
-        send({ type: "closed", id: m.id });
+        if (connections.delete(m.id)) send({ type: "closed", id: m.id });
+      };
+      c.client.on("error", (e) => {
+        if (connections.has(m.id)) send({ type: "error", id: m.id, message: e.message });
       });
+      c.client.on("close", finish);
       c.client.on("ready", () => {
         // Interactive input must not wait for TCP's small-packet coalescing.
         c.client.setNoDelay(true);
@@ -287,12 +287,13 @@ process.on("message", async (m) => {
             enqueueOutput(c, c.codec.decode(data), data.length);
             if (c.pending > 262144) stream.pause();
           });
-          stream.on("close", () => {
-            const rest = c.utf8.end();
-            if (rest) c.batchChunks.push(rest);
-            flushOutput(c);
-            c.client.end();
-          });
+          const shellClosed = () => {
+            if (!connections.has(m.id)) return;
+            finish();
+            c.client.destroy();
+          };
+          stream.once("end", shellClosed);
+          stream.once("close", shellClosed);
           if (m.directory) {
             // ASCII shell input preserves UTF-8 filenames even in a GBK terminal.
             const octal = Array.from(Buffer.from(m.directory, "utf8"),

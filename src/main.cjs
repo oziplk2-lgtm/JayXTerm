@@ -128,6 +128,10 @@ function finishTest(id, error, result) {
 function send(m) {
   if (worker?.connected) worker.send(m);
 }
+function requireWorker() {
+  if (!worker?.connected || worker.killed)
+    throw new Error("SSH 后台进程已退出，请重启应用");
+}
 function safeSessions() {
   return store
     .get()
@@ -135,6 +139,7 @@ function safeSessions() {
 }
 function request(message) {
   return new Promise((resolve, reject) => {
+    requireWorker();
     const rid = randomUUID();
     const timer = ["upload", "download", "relay", "read-text", "save-text", "remove"].includes(message.action)
       ? null
@@ -269,12 +274,14 @@ app.whenReady().then(() => {
     if (owner && !owner.isDestroyed()) owner.webContents.send("ssh:event", m);
   });
   worker.on("exit", () => {
-    for (const id of active.keys())
+    for (const id of active.keys()) {
+      states.set(id, "error");
       workspace.owner(id)?.webContents.send("ssh:event", {
         type: "error",
         id,
         message: "SSH 后台进程已退出，请重启应用",
       });
+    }
     active.clear();
     pendingPasswords.clear();
     for (const id of tests.keys()) finishTest(id, "SSH 后台进程已退出");
@@ -658,6 +665,7 @@ ipcMain.handle("sessions:choose-key", async (event) => {
   return result.canceled ? null : result.filePaths[0];
 });
 ipcMain.handle("ssh:test", (e, input) => {
+  requireWorker();
   const config = validateSession({
     ...input,
     name: String(input.name || "").trim() || "测试连接",
@@ -732,6 +740,7 @@ ipcMain.handle("sessions:delete", (e, id) => {
   return safeSessions();
 });
 ipcMain.handle("ssh:connect", (e, { sessionId, password, directory, cols, rows }) => {
+  requireWorker();
   const s = store.get().sessions.find((s) => s.id === sessionId);
   if (!s) throw new Error("会话不存在");
   const jumps = resolveJumpChain(s.jumpSessionId, s.id);
@@ -787,6 +796,7 @@ ipcMain.on("ssh:send", (e, m) => {
 });
 ipcMain.handle("ssh:duplicate", (event, { id: source, directory, cols, rows }) => {
   ensureOwner(event.sender, source);
+  requireWorker();
   if (!editorConnectionReady(source)) throw new Error("请先连接 SSH");
   if (typeof directory !== "string" || !directory.startsWith("/") ||
       /[\x00-\x1f\x7f]/.test(directory) || directory.length > 16384)

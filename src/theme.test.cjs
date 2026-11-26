@@ -11,6 +11,10 @@ test("whole-window themes preserve readable text across dark, light and mid-tone
       for (const foreground of [theme.ink, theme.muted, theme.accent])
         assert.ok(contrast(background, foreground) >= 4.5, `${color}: ${foreground} on ${background}`);
     }
+    for (const background of [theme.chrome, theme.variables.hover]) {
+      for (const lamp of ["tab-lamp-ready", "tab-lamp-connecting", "tab-lamp-disconnected"])
+        assert.ok(contrast(background, theme.variables[lamp]) >= 3, `${color}: ${lamp} on ${background}`);
+    }
   }
   const vscode = createTheme("#181818");
   assert.equal(vscode.terminal.foreground, "#cccccc");

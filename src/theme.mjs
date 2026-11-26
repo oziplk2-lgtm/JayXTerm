@@ -22,6 +22,14 @@ export function createTheme(color = defaultBackground) {
   const muted = readable(mix(ink, background, 0.2));
   const chrome = mix(background, shade, 0.08);
   const surface = mix(background, shade, 0.16);
+  const hover = mix(background, shade, 0.26);
+  const tabLamp = (preferred) => {
+    for (const amount of [0, 0.25, 0.5, 0.75]) {
+      const candidate = mix(preferred, strongest, amount);
+      if (contrast(candidate, chrome) >= 3 && contrast(candidate, hover) >= 3) return candidate;
+    }
+    return strongest;
+  };
   const accent = readable(dark ? "#4daafc" : "#214f8c");
   const selection = mix(background, ink, 0.25);
   const terminalSelection = dark && contrast("#264f78", background) >= 1.5 ? "#264f78" : selection;
@@ -46,9 +54,12 @@ export function createTheme(color = defaultBackground) {
       "page-bg": background, "page-ink": ink, "page-muted": muted,
       "page-selection": mix(background, shade, 0.2),
       chrome, surface, ink, muted, accent, "on-accent": dark ? "#000000" : "#ffffff",
-      line: mix(background, ink, 0.22), hover: mix(background, shade, 0.26),
+      line: mix(background, ink, 0.22), hover,
       "accent-fill": mix(background, shade, 0.2), "terminal-bg": background,
       success, warning, danger, "danger-bg": mix(background, shade, 0.2),
+      "tab-lamp-ready": tabLamp(dark ? "#76e4ac" : "#137448"),
+      "tab-lamp-connecting": tabLamp(dark ? "#ffd178" : "#936010"),
+      "tab-lamp-disconnected": tabLamp(dark ? "#ff7887" : "#bd243b"),
     },
     editor: {
       base: dark ? "vs-dark" : "vs", inherit: true, rules: [],

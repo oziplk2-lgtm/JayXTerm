@@ -319,14 +319,6 @@ body.resizing-sidebar {
 .session-tools button:hover {
   color: var(--page-ink);
 }
-.dot {
-  display: inline-block;
-  width: 5px;
-  height: 5px;
-  background: var(--success);
-  border-radius: 50%;
-  margin-right: 7px;
-}
 main {
   flex: 1;
   min-width: 0;
@@ -429,7 +421,21 @@ main {
   text-align: left;
 }
 .tab-select .dot {
-  flex-shrink: 0;
+  --lamp: var(--muted);
+  display: inline-block;
+  flex: 0 0 8px;
+  width: 8px;
+  height: 8px;
+  margin-right: 7px;
+  border-radius: 50%;
+  background: var(--lamp);
+}
+.tab[data-connection-state="ready"] .dot { --lamp: var(--tab-lamp-ready); }
+.tab[data-connection-state="connecting"] .dot { --lamp: var(--tab-lamp-connecting); }
+.tab:is([data-connection-state="closed"], [data-connection-state="error"]) .dot { --lamp: var(--tab-lamp-disconnected); }
+.tab[data-connection-state]:not([data-connection-state="exited"]) .dot {
+  --halo: color-mix(in srgb, var(--lamp) 26%, transparent);
+  box-shadow: 0 0 0 2px var(--halo), 0 0 7px 1px var(--halo);
 }
 .tab-name {
   overflow: hidden;

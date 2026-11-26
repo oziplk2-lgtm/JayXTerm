@@ -1326,8 +1326,8 @@ function applyTabTitle(tab, nextTitle) {
   const title = tabDisplayTitle(tab);
   if (tab.header) {
     tab.header.label.textContent = title;
-    tab.header.element.title = title + " · 可拖到其他分屏 · 双击重命名";
     tab.header.close.setAttribute("aria-label", "关闭 " + title);
+    renderTabIndicator(tab);
   }
   if (current === tab.id) {
     api.windowTitle(title);
@@ -1378,10 +1378,12 @@ function createTabElement(tab) {
   const title = tabDisplayTitle(tab);
   const element = el("div", "tab");
   const select = el("button", "tab-select");
+  const dot = el("span", "dot");
   const label = el("span", "tab-name", title);
   const close = el("button", "close", "×");
   select.type = close.type = "button";
-  select.append(el("span", "dot"), label);
+  dot.setAttribute("aria-hidden", "true");
+  select.append(dot, label);
   close.title = "关闭连接";
   close.setAttribute("aria-label", "关闭 " + title);
   close.onclick = (event) => {
@@ -1419,11 +1421,23 @@ function createTabElement(tab) {
   };
   return { element, select, label, close };
 }
+function renderTabIndicator(tab) {
+  if (!tab.header) return;
+  const { element, select } = tab.header;
+  const title = tabDisplayTitle(tab);
+  const state = tab.state === "已连接" ? "ready" : tab.state === "连接出错" ? "error"
+    : tab.state === "已断开" ? "closed" : "connecting";
+  element.dataset.connectionState = state;
+  element.dataset.connection = tab.id;
+  element.title = `${title} · ${tab.state} · 可拖到其他分屏 · 双击重命名`;
+  select.setAttribute("aria-label", `${title}，${tab.state}`);
+}
 function renderTabs() {
   for (const tab of tabs.values()) {
     tab.header ??= createTabElement(tab);
     const { element, select } = tab.header;
     if (element.parentElement !== tab.group.nav) tab.group.nav.append(element);
+    renderTabIndicator(tab);
     const visible = tab.group.shown === tab.id;
     element.classList.toggle("active", visible);
     select.setAttribute("aria-pressed", String(visible));
@@ -1579,6 +1593,7 @@ api.onEvent((m) => {
     });
   } else if (m.type === "ready") {
     t.state = "已连接";
+    renderTabs();
     hideReconnectBar(t);
     fitTerminal(t);
     if (isFilesUiVisibleForTab(t)) {
@@ -1594,6 +1609,7 @@ api.onEvent((m) => {
     t.echo.reset();
     clearCwdQuery(t);
     t.state = m.type === "closed" ? "已断开" : "连接出错";
+    renderTabs();
     showReconnectBar(t, m.message ? `${t.state}：${m.message}` : "SSH 连接已断开");
     quickPasswords.activate();
     if (fileWorkspaceOpen) renderWorkspaceFiles(t.group);
