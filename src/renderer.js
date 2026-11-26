@@ -1189,20 +1189,45 @@ function mergeGroup(group, target) {
   if (focusedGroup === group) focusedGroup = target;
   activate(current || target.shown || nextInGroup(target));
 }
+function syncTerminalViewport(tab) {
+  const core = tab?.term?._core;
+  const rs = core?._renderService;
+  const vp = core?._viewport;
+  if (!rs || !vp || !tab.pane?.offsetHeight) return;
+  // Work around @xterm/xterm 6.0 RenderService._handleIntersectionChange
+  // flushing _pausedResizeTask without re-syncing Viewport scrollDimensions.
+  if (rs._isPaused) rs._pausedResizeTask?.flush?.();
+  const dims = rs.dimensions?.css;
+  if (dims?.cell?.height > 0) {
+    const expectedHeight = Math.round(dims.cell.height * tab.term.rows);
+    if (Math.abs((dims.canvas?.height || 0) - expectedHeight) > 2) {
+      rs._renderer?.value?.handleResize?.(tab.term.cols, tab.term.rows);
+    }
+    const currentHeight = vp._scrollableElement?.getScrollDimensions?.()?.height;
+    if (currentHeight !== rs.dimensions?.css?.canvas?.height) {
+      vp._sync?.();
+    }
+  }
+}
 function saveTabScroll(tab) {
-  const buffer = tab?.term?.buffer?.active;
+  if (!tab || tab.savedScrollOffset != null) return;
+  const buffer = tab.term?.buffer?.active;
   if (!buffer) return;
   tab.savedScrollOffset = Math.max(0, buffer.baseY - buffer.viewportY);
 }
 function restoreTabScroll(tab, { clear = false } = {}) {
   if (!tab?.term || tab.savedScrollOffset == null) return;
+  syncTerminalViewport(tab);
   const offset = tab.savedScrollOffset;
   const buffer = tab.term.buffer.active;
   const targetLine = offset === 0 ? buffer.baseY : Math.max(0, buffer.baseY - offset);
-  if (offset === 0) {
-    if (buffer.viewportY !== buffer.baseY) tab.term.scrollToBottom();
-  } else if (buffer.viewportY !== targetLine) {
-    tab.term.scrollToLine(targetLine);
+  const vp = tab.term._core?._viewport;
+  if (buffer.viewportY !== targetLine) {
+    if (vp?.scrollToLine) vp.scrollToLine(targetLine, true);
+    if (buffer.viewportY !== targetLine) {
+      if (offset === 0) tab.term.scrollToBottom();
+      else tab.term.scrollToLine(targetLine);
+    }
   }
   if (clear) tab.savedScrollOffset = null;
 }
@@ -1482,9 +1507,10 @@ function fitTerminal(t) {
   const buf = t.term.buffer.active;
   const wasAtBottom = t.savedScrollOffset === 0 || buf.viewportY >= buf.baseY;
   t.fit.fit();
+  syncTerminalViewport(t);
   if (wasAtBottom) {
     t.savedScrollOffset = 0;
-    t.term.scrollToBottom();
+    restoreTabScroll(t);
   }
   if (t.savedScrollOffset != null) {
     requestAnimationFrame(() => {
