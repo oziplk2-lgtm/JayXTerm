@@ -58,8 +58,10 @@ async function check(w) {
   try {
     await run(`
       const initial = await api.settings();
-      if (initial.saveHistory || initial.fileOpen !== "single" || initial.cachePath)
+      if (initial.saveHistory || initial.fileOpen !== "single" || initial.cachePath || initial.showTabStatusDot !== false)
         throw new Error("Wrong default settings");
+      if (getComputedStyle($(".tab-select .dot")).display !== "none")
+        throw new Error("Tab status dot should be hidden by default");
       const color = () => getComputedStyle($(".sidebar")).backgroundColor;
       const terminal = () => getComputedStyle($(".terminal-group-body")).backgroundColor;
       if (!document.querySelector(".topbar #settings-open") || color() !== "rgb(24, 24, 24)")
@@ -89,14 +91,24 @@ async function check(w) {
       if (color() !== "rgb(34, 68, 102)" || terminal() !== "rgb(34, 68, 102)" ||
           getComputedStyle($(".terminal-pane.active .xterm-viewport")).backgroundColor !== terminal())
         throw new Error("Background preview did not update the terminal and workspace");
+      const dotToggle = $("#settings-tab-status-dot");
+      if (!dotToggle || dotToggle.checked)
+        throw new Error("Tab status dot toggle should be unchecked by default");
+      dotToggle.checked = true;
+      dotToggle.dispatchEvent(new Event("input"));
+      if (getComputedStyle($(".tab-select .dot")).display === "none")
+        throw new Error("Tab status dot preview did not show the indicator");
       $("#settings-cancel").click();
       await wait(() => color() === "rgb(24, 24, 24)");
       if (terminal() !== terminalBackground) throw new Error("Cancel did not restore the terminal theme");
+      if (getComputedStyle($(".tab-select .dot")).display !== "none")
+        throw new Error("Cancel did not hide the tab status dot");
       const form = await open();
       $("#settings-choose-cache").click();
       await wait(() => $("#settings-cache").value.endsWith("JayXTerm-cache"));
       form.elements.saveHistory.checked = true;
       form.elements.fileOpen.value = "single";
+      form.elements.showTabStatusDot.checked = true;
       pickerColor.value = "#283755";
       pickerColor.dispatchEvent(new Event("input"));
       form.requestSubmit();
@@ -106,6 +118,8 @@ async function check(w) {
         throw new Error("Cache directory was not scheduled");
       if (updated.backgroundColor !== "#283755" || color() !== "rgb(40, 55, 85)")
         throw new Error("Background setting was not saved");
+      if (!updated.showTabStatusDot || getComputedStyle($(".tab-select .dot")).display === "none")
+        throw new Error("Tab status dot setting was not saved or applied");
 
       const input = { name: "测试历史密码", host: "localhost", username: "jay",
         port: 22, password: "132exampleio", remember: true };
@@ -173,8 +187,11 @@ async function check(w) {
       $("#settings-default-background").click();
       edit.elements.saveHistory.checked = false;
       edit.elements.fileOpen.value = "single";
+      edit.elements.showTabStatusDot.checked = false;
       edit.requestSubmit();
       await wait(() => !$("#settings-dialog").open);
+      if ((await api.settings()).showTabStatusDot !== false || getComputedStyle($(".tab-select .dot")).display !== "none")
+        throw new Error("Tab status dot reset was not saved");
       if ((await api.passwordHistory()).items.length || (await api.passwordHistory()).enabled)
         throw new Error("Password history was not cleared");
       if ((await api.settings()).backgroundColor !== "#181818")

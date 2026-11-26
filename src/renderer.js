@@ -118,8 +118,11 @@ function renderTerminalFont(settings) {
     });
   });
 }
+function renderTabStatusDot(enabled) {
+  document.body.classList.toggle("show-tab-status-dot", Boolean(enabled));
+}
 const settingsPanel = installSettingsPanel({ api, previewColor: renderBackground,
-  previewFont: renderTerminalFont, previewKeywords: renderKeywordHighlights, onSave: updateSettings, toast });
+  previewFont: renderTerminalFont, previewKeywords: renderKeywordHighlights, previewTabStatusDot: renderTabStatusDot, onSave: updateSettings, toast });
 function renderKeywordHighlights(enabled) {
   if (enabled === highlightKeywords) return;
   highlightKeywords = enabled;
@@ -178,6 +181,7 @@ function updateSettings(settings) {
   renderBackground(settings.backgroundColor);
   renderTerminalFont(settings);
   renderKeywordHighlights(settings.highlightKeywords);
+  renderTabStatusDot(settings.showTabStatusDot);
   terminalSearchEnabled = settings.terminalSearchEnabled;
   terminalSearch.setEnabled(terminalSearchEnabled);
   commandHistoryEnabled = settings.commandHistoryEnabled;

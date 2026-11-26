@@ -3,8 +3,8 @@ import { installFontPicker } from "./font-picker.js";
 import { normalizeHexColor } from "./color-picker-utils.mjs";
 
 // Add sections in the markup and fields here; loading/saving and navigation stay shared.
-const fields = ["backgroundColor", "fontFamily", "cjkFontFamily", "fontSize", "scrollback", "defaultEncoding", "highlightKeywords", "terminalSearchEnabled", "commandHistoryEnabled", "quickPasswordsEnabled", "predictiveEcho", "hardwareAcceleration", "fileOpen", "saveHistory"];
-export function installSettingsPanel({ api, previewColor, previewFont, previewKeywords, onSave, toast }) {
+const fields = ["backgroundColor", "fontFamily", "cjkFontFamily", "fontSize", "scrollback", "defaultEncoding", "highlightKeywords", "terminalSearchEnabled", "commandHistoryEnabled", "quickPasswordsEnabled", "predictiveEcho", "hardwareAcceleration", "showTabStatusDot", "fileOpen", "saveHistory"];
+export function installSettingsPanel({ api, previewColor, previewFont, previewKeywords, previewTabStatusDot, onSave, toast }) {
   const $ = (selector) => document.querySelector(selector);
   const dialog = $("#settings-dialog"), form = $("#settings-form");
   const fontPicker = installFontPicker(dialog, form);
@@ -47,6 +47,7 @@ export function installSettingsPanel({ api, previewColor, previewFont, previewKe
     previewColor(input.backgroundColor);
     previewFont(input);
     previewKeywords(input.highlightKeywords);
+    previewTabStatusDot?.(input.showTabStatusDot);
     Object.assign($("#settings-font-preview").style, {
       fontFamily: terminalFont(input).fontFamily,
       fontSize: terminalFont(input).fontSize + "px",
@@ -77,7 +78,7 @@ export function installSettingsPanel({ api, previewColor, previewFont, previewKe
       button.disabled = false;
     }
   };
-  for (const name of ["backgroundColor", "fontFamily", "cjkFontFamily", "fontSize", "highlightKeywords"])
+  for (const name of ["backgroundColor", "fontFamily", "cjkFontFamily", "fontSize", "highlightKeywords", "showTabStatusDot"])
     form.elements[name].oninput = preview;
   function renderCache() {
     const field = $("#settings-cache");
@@ -132,7 +133,7 @@ export function installSettingsPanel({ api, previewColor, previewFont, previewKe
   };
   $("#settings-cancel").onclick = () => dialog.close();
   dialog.addEventListener("close", () => {
-    if (saved) { previewColor(saved.backgroundColor); previewFont(saved); previewKeywords(saved.highlightKeywords); }
+    if (saved) { previewColor(saved.backgroundColor); previewFont(saved); previewKeywords(saved.highlightKeywords); previewTabStatusDot?.(saved.showTabStatusDot); }
   });
   // Invalid inputs may live in an inactive section. Reveal them before browser validation.
   form.addEventListener("invalid", (event) => {

@@ -11,6 +11,7 @@ export const terminalDefaults = {
   quickPasswordsEnabled: false,
   predictiveEcho: true,
   hardwareAcceleration: false,
+  showTabStatusDot: false,
 };
 export const terminalEncodings = ["utf-8", "gbk", "gb2312"];
 export const validFontFamily = (value) => typeof value === "string" && value.trim().length > 0 &&

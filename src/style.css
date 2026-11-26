@@ -430,6 +430,9 @@ main {
   border-radius: 50%;
   background: var(--lamp);
 }
+body:not(.show-tab-status-dot) .tab-select .dot {
+  display: none;
+}
 .tab[data-connection-state="ready"] .dot { --lamp: var(--tab-lamp-ready); }
 .tab[data-connection-state="connecting"] .dot { --lamp: var(--tab-lamp-connecting); }
 .tab:is([data-connection-state="closed"], [data-connection-state="error"]) .dot { --lamp: var(--tab-lamp-disconnected); }
