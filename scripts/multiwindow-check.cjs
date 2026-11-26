@@ -119,7 +119,7 @@ async function check(source, fixture) {
   assert.ok(!(await text(target)).includes("WRONG_OWNER_INPUT"));
   // Changing remote directory in the destination must preserve real SFTP access.
   await target.webContents.executeJavaScript(
-    `document.querySelector('#remote-path').value='/home/jay/projects';document.querySelector('#path-form').requestSubmit()`,
+    `document.querySelector('#mode-files').click(); document.querySelector('#remote-path').value='/home/jay/projects';document.querySelector('#path-form').requestSubmit()`,
   );
   await waitFor(() =>
     target.webContents.executeJavaScript(

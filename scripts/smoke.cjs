@@ -105,7 +105,16 @@ app.whenReady().then(async () => {
       row.querySelector('button').click();
       for(let i=0;i<50;i++){
         await new Promise(r=>setTimeout(r,100));
-        if(document.querySelector('#status').textContent.includes('已连接')&&document.querySelector('#file-list').textContent.includes('README.md'))return;
+        if(document.querySelector('#status').textContent.includes('已连接'))break;
+      }
+      if(!document.querySelector('#status').textContent.includes('已连接'))
+        throw new Error('SSH UI failed: '+document.querySelector('#status').textContent);
+      if(!document.querySelector('#mode-sessions').classList.contains('active')||!document.querySelector('#files-panel').classList.contains('hidden'))
+        throw new Error('Opening a session must not auto-switch sidebar to remote files');
+      document.querySelector('#mode-files').click();
+      for(let i=0;i<50;i++){
+        await new Promise(r=>setTimeout(r,100));
+        if(document.querySelector('#file-list').textContent.includes('README.md'))return;
       }
       throw new Error('SSH/SFTP UI failed: '+document.querySelector('#status').textContent);
     })()`);

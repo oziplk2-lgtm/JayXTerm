@@ -84,7 +84,7 @@ async function check(win, fixture) {
     fixture.dirs.add(folder);
     fixture.dirs.add(folder + "/empty");
     fixture.files.set(folder + "/nested.txt", Buffer.from("nested"));
-    await run(`$('#remote-path').value = '/home/jay'; $('#path-form').requestSubmit();
+    await run(`$('#mode-files').click(); $('#remote-path').value = '/home/jay'; $('#path-form').requestSubmit();
       await wait(() => [...document.querySelectorAll('#file-list .filename')].some(node => node.textContent === ${JSON.stringify(path.posix.basename(deletedFile))}));`);
     let response = 0, confirmations = [], beforeConfirm;
     dialog.showMessageBox = async (_parent, options) => {

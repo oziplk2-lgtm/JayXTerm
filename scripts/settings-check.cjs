@@ -149,6 +149,7 @@ async function check(w) {
       await wait(() => files.querySelector("input").value === "/home/jay/projects");
       $("#file-workspace-toggle").click();
 
+      $("#mode-files").click();
       const sidebar = $("#path-form");
       $("#remote-path").value = "/home/jay";
       sidebar.requestSubmit();

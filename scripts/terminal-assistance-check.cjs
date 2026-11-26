@@ -35,7 +35,7 @@ async function check(win, fixture) {
     assert.equal(await run("return $('#terminal-search-toggle').checkVisibility();"), true);
     console.log("Checking visible keyword colors and compact file icons");
     for (const name of Object.keys(samples)) fixture.files.set("/home/jay/" + name, Buffer.from("UI fixture only"));
-    await run(`$('#remote-path').value = '/home/jay'; $('#path-form').requestSubmit();
+    await run(`$('#mode-files').click(); $('#remote-path').value = '/home/jay'; $('#path-form').requestSubmit();
       await wait(() => [...document.querySelectorAll('#file-list .filename')].some(node => node.textContent === 'sample.txt'));`);
     const icons = await run(`return Object.fromEntries([...document.querySelectorAll('#file-list .file-row')].map(row => [row.querySelector('.filename').textContent, {
       kind: row.querySelector('.file-icon').dataset.fileKind, height: row.getBoundingClientRect().height,

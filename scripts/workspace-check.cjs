@@ -63,9 +63,18 @@ async function check(window, source) {
       () =>
         js(
           other,
-          `!!document.querySelector('#file-list [data-directory="/home/jay/projects"]')`,
+          `document.querySelector('#status').textContent.includes('已连接')`,
         ),
       "Target window did not connect",
+    );
+    await js(other, `document.querySelector('#mode-files').click()`);
+    await waitFor(
+      () =>
+        js(
+          other,
+          `!!document.querySelector('#file-list [data-directory="/home/jay/projects"]')`,
+        ),
+      "Target window did not load remote files",
     );
     await js(
       window,
@@ -180,13 +189,14 @@ async function check(window, source) {
     );
     await js(
       window,
-      `document.querySelector('.terminal-group .tabs .tab-select').click()`,
+      `document.querySelector('.terminal-group .tabs .tab-select').click(); document.querySelector('#mode-files').click();`,
     );
-    assert.ok(
-      await js(
-        window,
-        `document.querySelector('#file-list').textContent.includes('upload-tree')`,
-      ),
+    await waitFor(
+      () =>
+        js(
+          window,
+          `document.querySelector('#file-list').textContent.includes('upload-tree')`,
+        ),
       "Sidebar did not follow the focused pane",
     );
     assert.equal(

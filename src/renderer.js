@@ -1088,7 +1088,6 @@ function createTerminal(session, id, { moving = false } = {}) {
   );
   if (!moving) {
     activate(id);
-    setMode("files");
     term.writeln("\x1b[32m正在连接 " + session.host + "…\x1b[0m");
   }
   return tab;
@@ -2555,7 +2554,6 @@ api.onWindow(async (m) => {
       t.term.options.disableStdin = true;
       t.pane.classList.add("moving");
       activate(id);
-      setMode("files");
       fitTerminal(t);
       t.term.scrollToLine(
         Math.max(0, t.term.buffer.active.baseY - (t.restoreDistance || 0)),
