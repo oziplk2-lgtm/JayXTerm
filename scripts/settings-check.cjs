@@ -38,12 +38,14 @@ async function check(w) {
   };
   const run = (code) => w.webContents.executeJavaScript(`(async () => {
       const $ = (query) => document.querySelector(query);
-      const wait = async (check) => {
-        for (let i = 0; i < 150; i++) {
+      const wait = async (check, diag) => {
+        const deadline = Date.now() + 8000;
+        while (Date.now() < deadline) {
           if (await check()) return;
           await new Promise(resolve => setTimeout(resolve, 35));
         }
-        throw new Error("Settings check timed out: " + check + " / " + $("#settings-error").textContent);
+        const extra = typeof diag === "function" ? " | " + JSON.stringify(diag()) : "";
+        throw new Error("Settings check timed out: " + check + " / " + $("#settings-error").textContent + extra);
       };
       const open = async () => {
         $("#settings-open").click();
@@ -227,12 +229,24 @@ async function check(w) {
     `);
     // Verify Ctrl+Left-Click on a terminal file path opens the remote Monaco editor.
     await run(`
-      const group = $(".terminal-group.focused") || $(".terminal-group");
-      const id = group?.querySelector(".tab.active")?.dataset.connection || window.__qaConnectionId;
-      const pane = group?.querySelector(".terminal-pane.active") || $(".terminal-pane.active");
-      pane.querySelector(".xterm-helper-textarea").focus();
+      const pane = $(".terminal-group.focused .terminal-pane.active") || $(".terminal-pane.active");
+      const activeGroup = pane?.closest(".terminal-group");
+      const id = activeGroup?.querySelector(".tab.active")?.dataset.connection || $(".tab.active")?.dataset.connection || window.__qaConnectionId;
+      if (!id || !pane) throw new Error("Missing active terminal for Ctrl+Click check: " + JSON.stringify({ id, hasPane: !!pane }));
+      pane.querySelector(".xterm-helper-textarea")?.focus();
       window.api.send({ type: "input", id, data: "\\r\\n\\r\\n# /home/jay/README.md\\r\\n" });
-      await wait(() => pane.querySelector(".xterm-rows").textContent.includes("# /home/jay/README.md"));
+      await wait(
+        () => pane.querySelector(".xterm-rows")?.textContent.includes("# /home/jay/README.md"),
+        () => ({
+          id,
+          qaId: window.__qaConnectionId,
+          activeTabs: [...document.querySelectorAll(".tab.active")].map(el => el.dataset.connection),
+          status: $("#status")?.textContent,
+          cols: pane.dataset.cols,
+          rows: pane.dataset.rows,
+          textTail: pane.querySelector(".xterm-rows")?.textContent.slice(-160),
+        }),
+      );
     `);
     const clickPoint = await winPointForTerminalText(w, "/home/jay/README.md");
     w.webContents.debugger.attach("1.3");

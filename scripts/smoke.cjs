@@ -101,7 +101,7 @@ app.whenReady().then(async () => {
       const rows=[...document.querySelectorAll('.session')];
       const row=rows.find(r=>r.textContent.includes('本地验收服务器'));
       if(!row)throw new Error('Connection session missing');
-      window.api.onEvent(m=>{if(m.type==='ready')window.__qaConnectionId=m.id;});
+      window.api.onEvent(m=>{if(m.type==='ready'&&!window.__qaConnectionId)window.__qaConnectionId=m.id;});
       row.querySelector('button').click();
       for(let i=0;i<50;i++){
         await new Promise(r=>setTimeout(r,100));
